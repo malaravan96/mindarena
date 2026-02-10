@@ -47,11 +47,20 @@ create table if not exists public.attempts (
   ms_taken int not null check (ms_taken >= 0),
   is_correct boolean not null,
   selected_index int not null check (selected_index >= 0),
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  -- Ensure one attempt per user per puzzle
+  unique(user_id, puzzle_id)
 );
 
+-- Indexes for performance
 create index if not exists attempts_puzzle_correct_time_idx
   on public.attempts (puzzle_id, is_correct, ms_taken);
+
+create index if not exists attempts_user_id_idx
+  on public.attempts (user_id);
+
+create index if not exists attempts_created_at_idx
+  on public.attempts (created_at desc);
 
 alter table public.attempts enable row level security;
 
@@ -71,3 +80,23 @@ using (false);
 create policy "attempts_no_delete"
 on public.attempts for delete
 using (false);
+
+-- ============================================
+-- FUNCTIONS & TRIGGERS
+-- ============================================
+
+-- Function to auto-create profile on user signup
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, display_name, updated_at)
+  values (new.id, new.email, now());
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Trigger to call the function when a new user is created
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();

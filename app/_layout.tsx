@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 
-export default function RootLayout() {
+function RootNavigator() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -22,7 +24,13 @@ export default function RootLayout() {
     };
   }, []);
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6366f1" />
+      </View>
+    );
+  }
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -34,3 +42,20 @@ export default function RootLayout() {
     </Stack>
   );
 }
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootNavigator />
+    </ThemeProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+  },
+});
