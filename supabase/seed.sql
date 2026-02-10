@@ -1,0 +1,4 @@
+-- Seed today's puzzle (edit date_key to today)
+-- Example:
+-- insert into public.puzzles(date_key,title,prompt,type,options,answer_index)
+-- values ('2026-02-10','Pattern','What comes next? 3, 6, 12, 24, ?','pattern',array['27','36','48','60'],2);
