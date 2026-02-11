@@ -1,12 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
+import { fontSize, fontWeight, spacing, borderRadius, isDesktop, isTablet } from '@/constants/theme';
 import { validateEmail, validatePassword, validateUsername } from '@/lib/validation';
 
 export default function Register() {
@@ -45,13 +53,10 @@ export default function Register() {
   }
 
   async function handleRegister() {
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
     try {
-      // Sign up with email and password
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -69,36 +74,23 @@ export default function Register() {
         throw new Error('Registration failed. Please try again.');
       }
 
-      // Create user profile
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: authData.user.id,
-        username: username.trim(),
-        email: email.trim(),
-        created_at: new Date().toISOString(),
-      });
-
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        // Don't throw - user is already created, they can update profile later
-      }
+      // Profile is auto-created by the database trigger (handle_new_user).
+      // No manual insert needed here.
 
       Alert.alert(
         'Registration Successful!',
         'Please check your email to verify your account. You can start using the app right away!',
-        [{ text: 'OK', onPress: () => router.replace('/(app)') }]
+        [{ text: 'OK' }]
       );
     } catch (e: any) {
-      console.error('Registration error:', e);
-      Alert.alert(
-        'Registration Failed',
-        e?.message || 'Something went wrong. Please try again.'
-      );
+      const msg = e?.message || 'Something went wrong. Please try again.';
+      Alert.alert('Registration Failed', msg);
     } finally {
       setLoading(false);
     }
   }
 
-  const maxWidth = isDesktop ? 500 : isTablet ? 600 : '100%';
+  const maxWidth = isDesktop ? 480 : isTablet ? 520 : '100%';
 
   return (
     <KeyboardAvoidingView
@@ -108,52 +100,31 @@ export default function Register() {
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { maxWidth, width: '100%' }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* App Icon/Logo */}
+        {/* Logo */}
         <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
           <Text style={styles.logoEmoji}>🧠</Text>
         </View>
 
-        {/* Title Section */}
-        <View style={styles.headerSection}>
-          <Text
-            style={[
-              styles.title,
-              {
-                color: colors.text,
-                fontSize: fontSize['3xl'],
-                fontWeight: fontWeight.black,
-              },
-            ]}
-          >
-            Create Account
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.base,
-                fontWeight: fontWeight.medium,
-              },
-            ]}
-          >
-            Join MindArena and start challenging your mind
-          </Text>
-        </View>
+        {/* Title */}
+        <Text style={[styles.title, { color: colors.text, fontSize: fontSize['3xl'] }]}>
+          Create Account
+        </Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: fontSize.base }]}>
+          Join MindArena and start challenging your mind
+        </Text>
 
-        {/* Registration Form */}
+        {/* Form */}
         <Card style={styles.card}>
           <Input
             label="Username"
             value={username}
             onChangeText={(text) => {
               setUsername(text);
-              if (errors.username) {
-                setErrors({ ...errors, username: undefined });
-              }
+              if (errors.username) setErrors({ ...errors, username: undefined });
             }}
-            placeholder="Enter your username"
+            placeholder="Choose a username"
             autoCapitalize="none"
             autoComplete="username"
             textContentType="username"
@@ -166,9 +137,7 @@ export default function Register() {
             value={email}
             onChangeText={(text) => {
               setEmail(text);
-              if (errors.email) {
-                setErrors({ ...errors, email: undefined });
-              }
+              if (errors.email) setErrors({ ...errors, email: undefined });
             }}
             placeholder="you@example.com"
             autoCapitalize="none"
@@ -184,9 +153,7 @@ export default function Register() {
             value={password}
             onChangeText={(text) => {
               setPassword(text);
-              if (errors.password) {
-                setErrors({ ...errors, password: undefined });
-              }
+              if (errors.password) setErrors({ ...errors, password: undefined });
             }}
             placeholder="Min 8 characters"
             secureTextEntry
@@ -195,6 +162,7 @@ export default function Register() {
             textContentType="newPassword"
             error={errors.password}
             editable={!loading}
+            helperText="Must include uppercase, lowercase, and a number"
           />
 
           <Input
@@ -202,9 +170,7 @@ export default function Register() {
             value={confirmPassword}
             onChangeText={(text) => {
               setConfirmPassword(text);
-              if (errors.confirmPassword) {
-                setErrors({ ...errors, confirmPassword: undefined });
-              }
+              if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
             }}
             placeholder="Re-enter your password"
             secureTextEntry
@@ -224,33 +190,15 @@ export default function Register() {
             size="lg"
             style={{ marginTop: spacing.sm }}
           />
-
-          <Text
-            style={[
-              styles.helperText,
-              {
-                color: colors.textTertiary,
-                fontSize: fontSize.xs,
-                marginTop: spacing.md,
-              },
-            ]}
-          >
-            By creating an account, you agree to our Terms of Service and Privacy Policy
-          </Text>
         </Card>
 
-        {/* Sign In Link */}
+        {/* Footer */}
         <View style={styles.footer}>
           <Text style={[styles.footerText, { color: colors.textSecondary }]}>
             Already have an account?{' '}
           </Text>
           <Link href="/(auth)" asChild>
-            <Text
-              style={[
-                styles.footerLink,
-                { color: colors.primary, fontWeight: fontWeight.bold },
-              ]}
-            >
+            <Text style={[styles.footerLink, { color: colors.primary, fontWeight: fontWeight.bold }]}>
               Sign In
             </Text>
           </Link>
@@ -261,54 +209,37 @@ export default function Register() {
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-  },
+  wrap: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
+    alignSelf: 'center',
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
+    width: 72,
+    height: 72,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.lg,
   },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  title: {
-    textAlign: 'center',
-  },
+  logoEmoji: { fontSize: 36 },
+  title: { fontWeight: fontWeight.black, textAlign: 'center' },
   subtitle: {
+    fontWeight: fontWeight.medium,
     textAlign: 'center',
     marginTop: spacing.xs,
+    marginBottom: spacing.xl,
   },
-  card: {
-    width: '100%',
-    marginBottom: spacing.md,
-  },
-  helperText: {
-    textAlign: 'center',
-  },
+  card: { width: '100%', marginBottom: spacing.md },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: spacing.md,
   },
-  footerText: {
-    fontSize: fontSize.sm,
-  },
-  footerLink: {
-    fontSize: fontSize.sm,
-  },
+  footerText: { fontSize: fontSize.sm },
+  footerLink: { fontSize: fontSize.sm },
 });

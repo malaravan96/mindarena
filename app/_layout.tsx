@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
-import { ThemeProvider } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
 function RootNavigator() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const { colors, colorScheme } = useTheme();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -26,28 +29,33 @@ function RootNavigator() {
 
   if (!ready) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6366f1" />
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      {!session ? (
-        <Stack.Screen name="(auth)" />
-      ) : (
-        <Stack.Screen name="(app)" />
-      )}
-    </Stack>
+    <>
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerShown: false }}>
+        {!session ? (
+          <Stack.Screen name="(auth)" />
+        ) : (
+          <Stack.Screen name="(app)" />
+        )}
+      </Stack>
+    </>
   );
 }
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <RootNavigator />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <RootNavigator />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -56,6 +64,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
   },
 });

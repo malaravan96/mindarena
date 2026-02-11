@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  RefreshControl,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { todayKey } from '@/lib/date';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/Card';
@@ -12,7 +21,7 @@ type Row = {
   user_id: string;
   ms_taken: number;
   created_at: string;
-  profiles?: { display_name: string | null } | null;
+  profiles: { username: string | null; display_name: string | null } | null;
 };
 
 export default function Leaderboard() {
@@ -55,14 +64,19 @@ export default function Leaderboard() {
 
       const { data, error } = await supabase
         .from('attempts')
-        .select('user_id, ms_taken, created_at, profiles(display_name)')
+        .select('user_id, ms_taken, created_at, profiles(username, display_name)')
         .eq('puzzle_id', puzzle.id)
         .eq('is_correct', true)
         .order('ms_taken', { ascending: true })
         .limit(100);
 
       if (error) throw error;
-      setRows((data as any) ?? []);
+      // Supabase joins return profiles as array; normalize to single object
+      const normalized = (data ?? []).map((d: any) => ({
+        ...d,
+        profiles: Array.isArray(d.profiles) ? d.profiles[0] ?? null : d.profiles,
+      }));
+      setRows(normalized as Row[]);
     } catch (e: any) {
       console.error('Leaderboard error:', e?.message);
       setRows([]);
@@ -77,75 +91,55 @@ export default function Leaderboard() {
     setRefreshing(false);
   }
 
-  const getRankEmoji = (rank: number) => {
+  const getRankDisplay = (rank: number) => {
     switch (rank) {
-      case 1:
-        return '🥇';
-      case 2:
-        return '🥈';
-      case 3:
-        return '🥉';
-      default:
-        return null;
+      case 1: return { emoji: '🥇', color: '#f59e0b' };
+      case 2: return { emoji: '🥈', color: '#94a3b8' };
+      case 3: return { emoji: '🥉', color: '#cd7f32' };
+      default: return { emoji: null, color: colors.textSecondary };
     }
   };
 
-  const getRankColor = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return '#f59e0b';
-      case 2:
-        return '#94a3b8';
-      case 3:
-        return '#cd7f32';
-      default:
-        return colors.textSecondary;
-    }
-  };
+  const header = (
+    <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Text style={[styles.backText, { color: colors.text }]}>←</Text>
+      </Pressable>
+      <Text style={[styles.headerTitle, { color: colors.text }]}>Leaderboard</Text>
+      <View style={{ width: 40 }} />
+    </View>
+  );
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>←</Text>
-          </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Leaderboard</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={styles.loadingContainer}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        {header}
+        <View style={styles.centerWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
             Loading leaderboard...
           </Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>←</Text>
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Leaderboard</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {header}
 
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 800 : undefined }]}
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
       >
-        {/* Date Badge */}
-        <View style={styles.dateBadgeContainer}>
-          <View style={[styles.dateBadge, { backgroundColor: colors.surfaceVariant }]}>
-            <Text style={[styles.dateBadgeText, { color: colors.textSecondary }]}>
-              🗓️ {dayKey}
-            </Text>
+        {/* Date */}
+        <View style={styles.dateRow}>
+          <View style={[styles.dateChip, { backgroundColor: colors.surfaceVariant }]}>
+            <Text style={[styles.dateChipText, { color: colors.textSecondary }]}>📅 {dayKey}</Text>
           </View>
         </View>
 
@@ -153,321 +147,191 @@ export default function Leaderboard() {
           <Card style={styles.emptyCard}>
             <Text style={styles.emptyEmoji}>🎯</Text>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>No Puzzle Today</Text>
-            <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>
-              There's no puzzle available for today yet. Check back soon!
+            <Text style={[styles.emptyMsg, { color: colors.textSecondary }]}>
+              Check back soon for today's puzzle!
             </Text>
-            <Button
-              title="Go Back"
-              onPress={() => router.back()}
-              variant="outline"
-              fullWidth
-              style={{ marginTop: spacing.md }}
-            />
+            <Button title="Go Back" onPress={() => router.back()} variant="outline" fullWidth style={{ marginTop: spacing.md }} />
           </Card>
         ) : rows.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Text style={styles.emptyEmoji}>🏆</Text>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>Be the First!</Text>
-            <Text style={[styles.emptyMessage, { color: colors.textSecondary }]}>
-              No one has solved today's puzzle yet. Solve it now and claim the top spot!
+            <Text style={[styles.emptyMsg, { color: colors.textSecondary }]}>
+              No one has solved today's puzzle yet. Claim the top spot!
             </Text>
-            <Button
-              title="Solve Puzzle"
-              onPress={() => router.back()}
-              fullWidth
-              style={{ marginTop: spacing.md }}
-            />
+            <Button title="Solve Puzzle" onPress={() => router.back()} fullWidth style={{ marginTop: spacing.md }} />
           </Card>
         ) : (
           <>
-            {/* Stats Card */}
+            {/* Stats */}
             <Card style={styles.statsCard}>
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: colors.primary }]}>{rows.length}</Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Solvers</Text>
+                  <Text style={[styles.statVal, { color: colors.primary }]}>{rows.length}</Text>
+                  <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Solvers</Text>
                 </View>
-                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+                <View style={[styles.statDiv, { backgroundColor: colors.border }]} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: colors.success }]}>
+                  <Text style={[styles.statVal, { color: colors.success }]}>
                     {(rows[0]?.ms_taken / 1000).toFixed(1)}s
                   </Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Fastest</Text>
+                  <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Fastest</Text>
                 </View>
-                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+                <View style={[styles.statDiv, { backgroundColor: colors.border }]} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: colors.secondary }]}>
-                    {(
-                      rows.reduce((sum, r) => sum + r.ms_taken, 0) /
-                      rows.length /
-                      1000
-                    ).toFixed(1)}
-                    s
+                  <Text style={[styles.statVal, { color: colors.secondary }]}>
+                    {(rows.reduce((s, r) => s + r.ms_taken, 0) / rows.length / 1000).toFixed(1)}s
                   </Text>
-                  <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Average</Text>
+                  <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Average</Text>
                 </View>
               </View>
             </Card>
 
-            {/* Leaderboard */}
-            <Card style={styles.leaderboardCard}>
-              <Text style={[styles.leaderboardTitle, { color: colors.text }]}>Top Performers</Text>
+            {/* Rows */}
+            <Card style={styles.boardCard}>
+              <Text style={[styles.boardTitle, { color: colors.text }]}>Top Performers</Text>
 
               {rows.map((row, idx) => {
                 const rank = idx + 1;
-                const name = row.profiles?.display_name || `User ${row.user_id.slice(0, 6)}`;
+                const name =
+                  row.profiles?.display_name ||
+                  row.profiles?.username ||
+                  `User ${row.user_id.slice(0, 6)}`;
                 const time = (row.ms_taken / 1000).toFixed(2);
-                const isCurrentUser = row.user_id === currentUserId;
-                const rankEmoji = getRankEmoji(rank);
-                const rankColor = getRankColor(rank);
+                const isMe = row.user_id === currentUserId;
+                const rd = getRankDisplay(rank);
 
                 return (
                   <View
-                    key={idx}
+                    key={row.user_id}
                     style={[
-                      styles.leaderboardRow,
+                      styles.row,
                       {
-                        backgroundColor: isCurrentUser
+                        backgroundColor: isMe
                           ? `${colors.primary}10`
                           : idx % 2 === 0
                           ? colors.background
                           : colors.surfaceVariant,
-                        borderLeftWidth: isCurrentUser ? 3 : 0,
+                        borderLeftWidth: isMe ? 3 : 0,
                         borderLeftColor: colors.primary,
                       },
                     ]}
                   >
-                    <View style={styles.rankContainer}>
-                      {rankEmoji ? (
-                        <Text style={styles.rankEmoji}>{rankEmoji}</Text>
+                    <View style={styles.rankWrap}>
+                      {rd.emoji ? (
+                        <Text style={styles.rankEmoji}>{rd.emoji}</Text>
                       ) : (
-                        <View style={[styles.rankBadge, { backgroundColor: colors.surfaceVariant }]}>
-                          <Text style={[styles.rankText, { color: rankColor }]}>#{rank}</Text>
+                        <View style={[styles.rankCircle, { backgroundColor: colors.surfaceVariant }]}>
+                          <Text style={[styles.rankNum, { color: rd.color }]}>#{rank}</Text>
                         </View>
                       )}
                     </View>
-
-                    <View style={styles.userInfo}>
+                    <View style={styles.userCol}>
                       <Text
                         style={[
                           styles.userName,
-                          {
-                            color: colors.text,
-                            fontWeight: isCurrentUser ? fontWeight.black : fontWeight.bold,
-                          },
+                          { color: colors.text, fontWeight: isMe ? fontWeight.black : fontWeight.semibold },
                         ]}
                         numberOfLines={1}
                       >
-                        {name}
-                        {isCurrentUser && ' (You)'}
-                      </Text>
-                      <Text style={[styles.userTime, { color: colors.textTertiary }]}>
-                        {new Date(row.created_at).toLocaleTimeString()}
+                        {name}{isMe ? ' (You)' : ''}
                       </Text>
                     </View>
-
-                    <View style={styles.timeContainer}>
-                      <Text
-                        style={[
-                          styles.timeValue,
-                          {
-                            color: rank <= 3 ? rankColor : colors.text,
-                            fontWeight: fontWeight.black,
-                          },
-                        ]}
-                      >
-                        {time}s
-                      </Text>
-                    </View>
+                    <Text style={[styles.timeVal, { color: rank <= 3 ? rd.color : colors.text }]}>
+                      {time}s
+                    </Text>
                   </View>
                 );
               })}
             </Card>
 
-            {/* User's Position (if not in top 100) */}
             {currentUserId && !rows.some((r) => r.user_id === currentUserId) && (
-              <Card style={styles.yourPositionCard}>
-                <View style={{ backgroundColor: colors.surfaceVariant, padding: spacing.md, borderRadius: borderRadius.md }}>
-                  <Text style={[styles.yourPositionText, { color: colors.textSecondary }]}>
-                    You haven't solved today's puzzle yet or you're not in the top 100.
-                  </Text>
-                  <Button
-                    title="Solve Now"
-                    onPress={() => router.back()}
-                    variant="outline"
-                    size="sm"
-                    fullWidth
-                    style={{ marginTop: spacing.sm }}
-                  />
-                </View>
-              </Card>
+              <View style={[styles.notInList, { backgroundColor: colors.surfaceVariant }]}>
+                <Text style={[styles.notInListText, { color: colors.textSecondary }]}>
+                  You haven't solved today's puzzle yet.
+                </Text>
+                <Button
+                  title="Solve Now"
+                  onPress={() => router.back()}
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  style={{ marginTop: spacing.sm }}
+                />
+              </View>
             )}
           </>
         )}
 
         <View style={{ height: spacing.xl }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    fontSize: fontSize['2xl'],
-  },
-  headerTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  loadingText: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.medium,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.md,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  dateBadgeContainer: {
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  dateBadge: {
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  backText: { fontSize: fontSize['2xl'] },
+  headerTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
+  centerWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.md },
+  loadingText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
+
+  scroll: { flex: 1 },
+  scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%' },
+
+  dateRow: { alignItems: 'center', marginBottom: spacing.md },
+  dateChip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
   },
-  dateBadgeText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-  },
-  statsCard: {
-    marginBottom: spacing.md,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: fontSize['3xl'],
-    fontWeight: fontWeight.black,
-  },
-  statLabel: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-    marginTop: spacing.xs,
-  },
-  statDivider: {
-    width: 1,
-    height: 40,
-  },
-  leaderboardCard: {
-    marginBottom: spacing.md,
-  },
-  leaderboardTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-    marginBottom: spacing.md,
-  },
-  leaderboardRow: {
+  dateChipText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+
+  statsCard: { marginBottom: spacing.md },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  statItem: { flex: 1, alignItems: 'center' },
+  statVal: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  statLbl: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, marginTop: spacing.xs },
+  statDiv: { width: 1, height: 36 },
+
+  boardCard: { marginBottom: spacing.md },
+  boardTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.md },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
+    padding: spacing.sm,
+    paddingHorizontal: spacing.md,
     borderRadius: borderRadius.md,
-    marginBottom: spacing.xs,
+    marginBottom: 2,
   },
-  rankContainer: {
-    width: 50,
-    alignItems: 'center',
-  },
-  rankEmoji: {
-    fontSize: fontSize['2xl'],
-  },
-  rankBadge: {
-    width: 36,
-    height: 36,
+  rankWrap: { width: 44, alignItems: 'center' },
+  rankEmoji: { fontSize: fontSize.xl },
+  rankCircle: {
+    width: 32,
+    height: 32,
     borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  rankText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-  },
-  userInfo: {
-    flex: 1,
-    marginLeft: spacing.sm,
-  },
-  userName: {
-    fontSize: fontSize.base,
-    marginBottom: 2,
-  },
-  userTime: {
-    fontSize: fontSize.xs,
-  },
-  timeContainer: {
-    marginLeft: spacing.sm,
-  },
-  timeValue: {
-    fontSize: fontSize.lg,
-  },
-  emptyCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.xxl,
-  },
-  emptyEmoji: {
-    fontSize: 64,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: fontSize['2xl'],
-    fontWeight: fontWeight.black,
-    marginBottom: spacing.sm,
-    textAlign: 'center',
-  },
-  emptyMessage: {
-    fontSize: fontSize.base,
-    textAlign: 'center',
-    maxWidth: 300,
-  },
-  yourPositionCard: {
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  yourPositionText: {
-    fontSize: fontSize.sm,
-    textAlign: 'center',
-  },
+  rankNum: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  userCol: { flex: 1, marginLeft: spacing.sm },
+  userName: { fontSize: fontSize.base },
+  timeVal: { fontSize: fontSize.base, fontWeight: fontWeight.black, marginLeft: spacing.sm },
+
+  emptyCard: { alignItems: 'center', paddingVertical: spacing.xxl },
+  emptyEmoji: { fontSize: 56, marginBottom: spacing.md },
+  emptyTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.sm, textAlign: 'center' },
+  emptyMsg: { fontSize: fontSize.base, textAlign: 'center', maxWidth: 300 },
+
+  notInList: { padding: spacing.md, borderRadius: borderRadius.md, marginBottom: spacing.md },
+  notInListText: { fontSize: fontSize.sm, textAlign: 'center' },
 });

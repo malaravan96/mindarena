@@ -5,7 +5,9 @@
       "Bash(npm run typecheck:*)",
       "Bash(npm run web:*)",
       "Bash(npx expo start:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(npx expo:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []

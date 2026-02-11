@@ -1,14 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ScrollView, ActivityIndicator, Animated } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  Alert,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { todayKey } from '@/lib/date';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import { Container } from '@/components/Container';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing, borderRadius, isDesktop, isTablet } from '@/constants/theme';
+import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
 
 type DbPuzzle = {
   id: string;
@@ -20,28 +28,42 @@ type DbPuzzle = {
   answer_index: number;
 };
 
+type ExistingAttempt = {
+  selected_index: number;
+  is_correct: boolean;
+  ms_taken: number;
+};
+
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'correct' | 'wrong'>('idle');
   const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState('');
+  const [existingAttempt, setExistingAttempt] = useState<ExistingAttempt | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const dayKey = useMemo(() => todayKey(), []);
 
+  // Live timer
+  useEffect(() => {
+    if (status === 'idle' && startedAt && !existingAttempt) {
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [status, startedAt, existingAttempt]);
+
   useEffect(() => {
     loadPuzzle();
-    loadUserInfo();
   }, [dayKey]);
-
-  async function loadUserInfo() {
-    const { data: userData } = await supabase.auth.getUser();
-    setUserEmail(userData.user?.email ?? '');
-  }
 
   async function loadPuzzle() {
     setLoading(true);
@@ -54,18 +76,39 @@ export default function Home() {
         .maybeSingle<DbPuzzle>();
 
       if (error) throw error;
+
       if (data) {
-        setPuzzle({
+        const p: Puzzle = {
           id: data.id,
           date_key: data.date_key,
           title: data.title,
           prompt: data.prompt,
-          type: data.type as any,
+          type: data.type as Puzzle['type'],
           options: data.options,
           answer_index: data.answer_index,
-        });
+        };
+        setPuzzle(p);
+
+        // Check if user already attempted this puzzle
+        const { data: userData } = await supabase.auth.getUser();
+        const uid = userData.user?.id;
+        if (uid) {
+          const { data: attempt } = await supabase
+            .from('attempts')
+            .select('selected_index, is_correct, ms_taken')
+            .eq('user_id', uid)
+            .eq('puzzle_id', data.id)
+            .maybeSingle<ExistingAttempt>();
+
+          if (attempt) {
+            setExistingAttempt(attempt);
+            setSelected(attempt.selected_index);
+            setStatus(attempt.is_correct ? 'correct' : 'wrong');
+            setElapsed(Math.floor(attempt.ms_taken / 1000));
+            return;
+          }
+        }
       } else {
-        // Offline fallback
         setPuzzle(offlinePuzzles[new Date().getDate() % offlinePuzzles.length]);
       }
     } catch {
@@ -77,18 +120,13 @@ export default function Home() {
   }
 
   async function submit() {
-    if (!puzzle) return;
-    if (selected === null) {
-      Alert.alert('Select an answer', 'Please choose one of the options before submitting.');
-      return;
-    }
-    if (!startedAt) return;
+    if (!puzzle || selected === null || !startedAt) return;
 
     const ms = Date.now() - startedAt;
     const correct = selected === puzzle.answer_index;
     setStatus(correct ? 'correct' : 'wrong');
+    setElapsed(Math.floor(ms / 1000));
 
-    // Save attempt only if puzzle is from Supabase (not offline)
     if (!puzzle.id.startsWith('offline')) {
       setSubmitting(true);
       try {
@@ -102,11 +140,19 @@ export default function Home() {
           ms_taken: ms,
           is_correct: correct,
           selected_index: selected,
-          created_at: new Date().toISOString(),
         });
-        if (error) throw error;
+
+        if (error) {
+          if (error.code === '23505') {
+            // Duplicate - user already submitted (race condition guard)
+            return;
+          }
+          throw error;
+        }
       } catch (e: any) {
-        Alert.alert('Save failed', e?.message ?? 'Unknown error');
+        if (e?.code !== '23505') {
+          Alert.alert('Save failed', e?.message ?? 'Unknown error');
+        }
       } finally {
         setSubmitting(false);
       }
@@ -128,179 +174,154 @@ export default function Home() {
 
   const getPuzzleTypeColor = (type: string) => {
     switch (type) {
-      case 'pattern':
-        return '#f59e0b';
-      case 'logic':
-        return '#8b5cf6';
-      case 'math':
-        return '#10b981';
-      default:
-        return colors.primary;
+      case 'pattern': return '#f59e0b';
+      case 'logic': return '#8b5cf6';
+      case 'math': return '#10b981';
+      default: return colors.primary;
     }
   };
 
   const getPuzzleTypeEmoji = (type: string) => {
     switch (type) {
-      case 'pattern':
-        return '🔍';
-      case 'logic':
-        return '🧩';
-      case 'math':
-        return '🔢';
-      default:
-        return '🧠';
+      case 'pattern': return '🔍';
+      case 'logic': return '🧩';
+      case 'math': return '🔢';
+      default: return '🧠';
     }
   };
 
   if (loading) {
     return (
-      <Container centered>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary, marginTop: spacing.md }]}>
-          Loading today's puzzle...
-        </Text>
-      </Container>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading today's puzzle...
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (!puzzle) {
     return (
-      <Container centered>
-        <Text style={[styles.errorText, { color: colors.error }]}>Failed to load puzzle</Text>
-        <Button title="Try Again" onPress={loadPuzzle} style={{ marginTop: spacing.lg }} />
-      </Container>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingWrap}>
+          <Text style={[styles.errorText, { color: colors.error }]}>Failed to load puzzle</Text>
+          <Button title="Try Again" onPress={loadPuzzle} style={{ marginTop: spacing.lg }} />
+        </View>
+      </SafeAreaView>
     );
   }
 
-  const timeElapsed = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+  const alreadyAnswered = !!existingAttempt || status !== 'idle';
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={styles.headerLeft}>
           <Text style={[styles.appTitle, { color: colors.text }]}>MindArena</Text>
-          <View style={styles.headerBadge}>
-            <Text style={styles.headerBadgeText}>🔥 {dayKey}</Text>
+          <View style={[styles.dateBadge, { backgroundColor: `${colors.warning}20` }]}>
+            <Text style={[styles.dateBadgeText, { color: colors.warning }]}>{dayKey}</Text>
           </View>
         </View>
         <View style={styles.headerRight}>
           <Pressable
             onPress={() => router.push('/leaderboard')}
-            style={[styles.iconButton, { backgroundColor: colors.surfaceVariant }]}
+            style={[styles.iconBtn, { backgroundColor: colors.surfaceVariant }]}
           >
-            <Text style={styles.iconButtonText}>🏆</Text>
+            <Text style={styles.iconBtnText}>🏆</Text>
           </Pressable>
           <Pressable
             onPress={() => router.push('/profile')}
-            style={[styles.iconButton, { backgroundColor: colors.surfaceVariant }]}
+            style={[styles.iconBtn, { backgroundColor: colors.surfaceVariant }]}
           >
-            <Text style={styles.iconButtonText}>👤</Text>
+            <Text style={styles.iconBtnText}>👤</Text>
           </Pressable>
         </View>
       </View>
 
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 800 : undefined }]}
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Puzzle Type Badge */}
-        <View style={styles.puzzleTypeContainer}>
-          <View
-            style={[
-              styles.puzzleTypeBadge,
-              { backgroundColor: `${getPuzzleTypeColor(puzzle.type)}20` },
-            ]}
-          >
-            <Text style={styles.puzzleTypeEmoji}>{getPuzzleTypeEmoji(puzzle.type)}</Text>
-            <Text
-              style={[
-                styles.puzzleTypeText,
-                { color: getPuzzleTypeColor(puzzle.type), fontWeight: fontWeight.bold },
-              ]}
-            >
-              {puzzle.title}
+        {/* Type + Timer */}
+        <View style={styles.metaRow}>
+          <View style={[styles.typeBadge, { backgroundColor: `${getPuzzleTypeColor(puzzle.type)}15` }]}>
+            <Text style={styles.typeEmoji}>{getPuzzleTypeEmoji(puzzle.type)}</Text>
+            <Text style={[styles.typeText, { color: getPuzzleTypeColor(puzzle.type) }]}>
+              {puzzle.type.charAt(0).toUpperCase() + puzzle.type.slice(1)}
             </Text>
           </View>
-          {status === 'idle' && (
-            <View style={[styles.timerBadge, { backgroundColor: colors.surfaceVariant }]}>
-              <Text style={[styles.timerText, { color: colors.textSecondary }]}>
-                ⏱️ {timeElapsed}s
-              </Text>
-            </View>
-          )}
+          <View style={[styles.timerBadge, { backgroundColor: colors.surfaceVariant }]}>
+            <Text style={[styles.timerText, { color: colors.textSecondary }]}>
+              ⏱ {elapsed}s
+            </Text>
+          </View>
         </View>
 
-        {/* Puzzle Card */}
-        <Card style={styles.puzzleCard}>
-          <Text style={[styles.puzzleTitle, { color: colors.text }]}>Today's Challenge</Text>
+        {/* Puzzle */}
+        <Card style={styles.puzzleCard} padding="lg">
+          <Text style={[styles.puzzleTitle, { color: colors.text }]}>{puzzle.title}</Text>
           <Text style={[styles.puzzlePrompt, { color: colors.text }]}>{puzzle.prompt}</Text>
 
           {/* Options */}
-          <View style={styles.optionsContainer}>
+          <View style={styles.optionsWrap}>
             {puzzle.options.map((opt, i) => {
               const active = selected === i;
               const showAnswer = status !== 'idle';
               const isCorrect = i === puzzle.answer_index;
               const isWrong = showAnswer && active && !isCorrect;
 
-              const optionStyle: any[] = [
-                styles.option,
-                { borderColor: colors.border, backgroundColor: colors.surface },
-              ];
-              const optionTextStyle: any[] = [styles.optionText, { color: colors.text }];
-              let badgeStyle: any = null;
+              let borderColor = colors.border;
+              let bgColor = colors.surface;
+              let textColor = colors.text;
+              let letterBg = 'transparent';
+              let badge: string | null = null;
 
-              if (active && status === 'idle') {
-                optionStyle.push({
-                  borderColor: colors.primary,
-                  backgroundColor: `${colors.primary}10`,
-                });
-                optionTextStyle.push({ color: colors.primary, fontWeight: fontWeight.bold });
+              if (active && !showAnswer) {
+                borderColor = colors.primary;
+                bgColor = `${colors.primary}08`;
+                textColor = colors.primary;
               }
-
               if (showAnswer && isCorrect) {
-                optionStyle.push({
-                  borderColor: colors.correct,
-                  backgroundColor: `${colors.correct}10`,
-                });
-                optionTextStyle.push({ color: colors.correct, fontWeight: fontWeight.bold });
-                badgeStyle = { backgroundColor: colors.correct };
+                borderColor = colors.correct;
+                bgColor = `${colors.correct}10`;
+                textColor = colors.correct;
+                badge = '✓';
               }
-
               if (isWrong) {
-                optionStyle.push({
-                  borderColor: colors.wrong,
-                  backgroundColor: `${colors.wrong}10`,
-                });
-                optionTextStyle.push({ color: colors.wrong, fontWeight: fontWeight.bold });
-                badgeStyle = { backgroundColor: colors.wrong };
+                borderColor = colors.wrong;
+                bgColor = `${colors.wrong}10`;
+                textColor = colors.wrong;
+                badge = '✗';
               }
 
               return (
                 <Pressable
                   key={i}
-                  onPress={() => status === 'idle' && setSelected(i)}
-                  disabled={status !== 'idle'}
-                  style={optionStyle}
+                  onPress={() => !alreadyAnswered && setSelected(i)}
+                  disabled={alreadyAnswered}
+                  style={[styles.option, { borderColor, backgroundColor: bgColor }]}
                 >
                   <View style={styles.optionContent}>
-                    <View style={[styles.optionLetter, { borderColor: colors.border }]}>
-                      <Text style={[styles.optionLetterText, { color: colors.textSecondary }]}>
+                    <View style={[styles.optionLetter, { borderColor }]}>
+                      <Text style={[styles.optionLetterText, { color: textColor }]}>
                         {String.fromCharCode(65 + i)}
                       </Text>
                     </View>
-                    <Text style={optionTextStyle}>{opt}</Text>
+                    <Text style={[styles.optionText, { color: textColor }]}>{opt}</Text>
                   </View>
-                  {showAnswer && isCorrect && (
-                    <View style={[styles.optionBadge, badgeStyle]}>
-                      <Text style={styles.optionBadgeText}>✓</Text>
-                    </View>
-                  )}
-                  {isWrong && (
-                    <View style={[styles.optionBadge, badgeStyle]}>
-                      <Text style={styles.optionBadgeText}>✗</Text>
+                  {badge && (
+                    <View
+                      style={[
+                        styles.optionBadge,
+                        { backgroundColor: isWrong ? colors.wrong : colors.correct },
+                      ]}
+                    >
+                      <Text style={styles.optionBadgeText}>{badge}</Text>
                     </View>
                   )}
                 </Pressable>
@@ -308,8 +329,8 @@ export default function Home() {
             })}
           </View>
 
-          {/* Submit Button */}
-          {status === 'idle' && (
+          {/* Submit */}
+          {status === 'idle' && !existingAttempt && (
             <Button
               title={submitting ? 'Submitting...' : 'Submit Answer'}
               onPress={submit}
@@ -321,13 +342,15 @@ export default function Home() {
             />
           )}
 
-          {/* Result */}
+          {/* Results */}
           {status === 'correct' && (
             <View style={[styles.resultCard, { backgroundColor: `${colors.correct}10` }]}>
               <Text style={styles.resultEmoji}>🎉</Text>
               <Text style={[styles.resultTitle, { color: colors.correct }]}>Correct!</Text>
-              <Text style={[styles.resultMessage, { color: colors.textSecondary }]}>
-                You solved it in {Math.floor(timeElapsed)} seconds!
+              <Text style={[styles.resultMsg, { color: colors.textSecondary }]}>
+                {existingAttempt
+                  ? `You solved it in ${(existingAttempt.ms_taken / 1000).toFixed(1)}s`
+                  : `Solved in ${elapsed}s`}
               </Text>
               <Button
                 title="View Leaderboard"
@@ -343,7 +366,7 @@ export default function Home() {
             <View style={[styles.resultCard, { backgroundColor: `${colors.wrong}10` }]}>
               <Text style={styles.resultEmoji}>😔</Text>
               <Text style={[styles.resultTitle, { color: colors.wrong }]}>Not quite!</Text>
-              <Text style={[styles.resultMessage, { color: colors.textSecondary }]}>
+              <Text style={[styles.resultMsg, { color: colors.textSecondary }]}>
                 The correct answer is highlighted above. Try again tomorrow!
               </Text>
               <Button
@@ -359,108 +382,84 @@ export default function Home() {
 
         {/* Offline Notice */}
         {puzzle.id.startsWith('offline') && (
-          <Card style={styles.offlineCard} elevated={false}>
-            <View style={{ backgroundColor: colors.surfaceVariant, padding: spacing.md, borderRadius: borderRadius.md }}>
-              <Text style={[styles.offlineTitle, { color: colors.textSecondary }]}>
-                📱 Offline Mode
-              </Text>
-              <Text style={[styles.offlineText, { color: colors.textTertiary }]}>
-                Connect to Supabase to enable leaderboards and save your progress
-              </Text>
-            </View>
-          </Card>
+          <View style={[styles.offlineBar, { backgroundColor: colors.surfaceVariant }]}>
+            <Text style={[styles.offlineText, { color: colors.textSecondary }]}>
+              📱 Offline mode - connect Supabase for leaderboards
+            </Text>
+          </View>
         )}
 
         {/* Quick Actions */}
-        <View style={styles.quickActionsContainer}>
+        <View style={styles.quickRow}>
           <Pressable
             style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => router.push('/leaderboard')}
           >
-            <Text style={styles.quickActionIcon}>🏆</Text>
-            <Text style={[styles.quickActionText, { color: colors.text }]}>Leaderboard</Text>
+            <Text style={styles.quickIcon}>🏆</Text>
+            <Text style={[styles.quickLabel, { color: colors.text }]}>Leaderboard</Text>
           </Pressable>
           <Pressable
             style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => router.push('/profile')}
           >
-            <Text style={styles.quickActionIcon}>👤</Text>
-            <Text style={[styles.quickActionText, { color: colors.text }]}>Profile</Text>
+            <Text style={styles.quickIcon}>👤</Text>
+            <Text style={[styles.quickLabel, { color: colors.text }]}>Profile</Text>
           </Pressable>
           <Pressable
             style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={signOut}
           >
-            <Text style={styles.quickActionIcon}>🚪</Text>
-            <Text style={[styles.quickActionText, { color: colors.text }]}>Sign Out</Text>
+            <Text style={styles.quickIcon}>🚪</Text>
+            <Text style={[styles.quickLabel, { color: colors.text }]}>Sign Out</Text>
           </Pressable>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.md },
+  loadingText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
+  errorText: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.md,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  appTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  headerBadge: {
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  appTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
+  dateBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs / 2,
     borderRadius: borderRadius.sm,
-    backgroundColor: '#fef3c7',
   },
-  headerBadgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  iconButton: {
+  dateBadgeText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  headerRight: { flexDirection: 'row', gap: spacing.sm },
+  iconBtn: {
     width: 40,
     height: 40,
     borderRadius: borderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  iconButtonText: {
-    fontSize: 20,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: spacing.md,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  puzzleTypeContainer: {
+  iconBtnText: { fontSize: 18 },
+
+  scroll: { flex: 1 },
+  scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%', paddingBottom: spacing.xl },
+
+  metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  puzzleTypeBadge: {
+  typeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
@@ -468,38 +467,28 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     gap: spacing.xs,
   },
-  puzzleTypeEmoji: {
-    fontSize: fontSize.lg,
-  },
-  puzzleTypeText: {
-    fontSize: fontSize.base,
-  },
+  typeEmoji: { fontSize: fontSize.lg },
+  typeText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
   timerBadge: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.full,
   },
-  timerText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-  },
-  puzzleCard: {
-    marginBottom: spacing.md,
-  },
+  timerText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+
+  puzzleCard: { marginBottom: spacing.md },
   puzzleTitle: {
     fontSize: fontSize['2xl'],
     fontWeight: fontWeight.black,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   puzzlePrompt: {
     fontSize: fontSize.lg,
-    fontWeight: fontWeight.semibold,
-    lineHeight: fontSize.lg * 1.5,
+    fontWeight: fontWeight.medium,
+    lineHeight: fontSize.lg * 1.6,
     marginBottom: spacing.lg,
   },
-  optionsContainer: {
-    gap: spacing.md,
-  },
+  optionsWrap: { gap: spacing.sm },
   option: {
     borderWidth: 2,
     borderRadius: borderRadius.md,
@@ -508,12 +497,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  optionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    flex: 1,
-  },
+  optionContent: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
   optionLetter: {
     width: 32,
     height: 32,
@@ -522,14 +506,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  optionLetterText: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
-  optionText: {
-    fontSize: fontSize.base,
-    flex: 1,
-  },
+  optionLetterText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  optionText: { fontSize: fontSize.base, flex: 1 },
   optionBadge: {
     width: 28,
     height: 28,
@@ -537,48 +515,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  optionBadgeText: {
-    color: '#ffffff',
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
+  optionBadgeText: { color: '#fff', fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+
   resultCard: {
     marginTop: spacing.lg,
     padding: spacing.lg,
     borderRadius: borderRadius.lg,
     alignItems: 'center',
   },
-  resultEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.sm,
-  },
-  resultTitle: {
-    fontSize: fontSize['2xl'],
-    fontWeight: fontWeight.black,
-    marginBottom: spacing.xs,
-  },
-  resultMessage: {
-    fontSize: fontSize.base,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  offlineCard: {
-    marginBottom: spacing.md,
+  resultEmoji: { fontSize: 48, marginBottom: spacing.sm },
+  resultTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.xs },
+  resultMsg: { fontSize: fontSize.base, textAlign: 'center', marginBottom: spacing.sm },
+
+  offlineBar: {
     padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.md,
+    alignItems: 'center',
   },
-  offlineTitle: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-    marginBottom: spacing.xs,
-  },
-  offlineText: {
-    fontSize: fontSize.sm,
-  },
-  quickActionsContainer: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
+  offlineText: { fontSize: fontSize.sm },
+
+  quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.xl },
   quickAction: {
     flex: 1,
     alignItems: 'center',
@@ -586,20 +543,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     borderWidth: 1,
   },
-  quickActionIcon: {
-    fontSize: 28,
-    marginBottom: spacing.xs,
-  },
-  quickActionText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-  },
-  loadingText: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.medium,
-  },
-  errorText: {
-    fontSize: fontSize.lg,
-    fontWeight: fontWeight.bold,
-  },
+  quickIcon: { fontSize: 24, marginBottom: spacing.xs },
+  quickLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 });
