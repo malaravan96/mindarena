@@ -1,52 +1,52 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
+import { validateEmail } from '@/lib/validation';
 
-export default function SignIn() {
+export default function ForgotPassword() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const { colors } = useTheme();
 
-  async function sendMagicLink() {
-    const v = email.trim();
-    setError('');
-
-    if (!v) {
-      setError('Email is required');
-      return;
-    }
-
-    if (!v.includes('@') || !v.includes('.')) {
-      setError('Please enter a valid email address');
+  async function handleResetPassword() {
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
       return;
     }
 
     setLoading(true);
+    setError('');
+
     try {
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email: v,
-        options: {
-          emailRedirectTo: 'mindarena://',
-        },
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: 'mindarena://reset-password',
       });
-      if (authError) throw authError;
+
+      if (resetError) throw resetError;
+
       setSuccess(true);
       Alert.alert(
         'Check your email',
-        'We sent you a magic link. Click it to sign in instantly!',
+        'We sent you a password reset link. Click it to create a new password.',
         [{ text: 'OK' }]
       );
     } catch (e: any) {
-      setError(e?.message ?? 'Something went wrong. Please try again.');
-      Alert.alert('Sign-in failed', e?.message ?? 'Unknown error');
+      console.error('Password reset error:', e);
+      setError(e?.message || 'Something went wrong. Please try again.');
+      Alert.alert(
+        'Reset Failed',
+        e?.message || 'Could not send reset email. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -62,7 +62,7 @@ export default function SignIn() {
       <View style={[styles.content, { maxWidth, width: '100%' }]}>
         {/* App Icon/Logo */}
         <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🧠</Text>
+          <Text style={styles.logoEmoji}>🔑</Text>
         </View>
 
         {/* Title Section */}
@@ -72,57 +72,31 @@ export default function SignIn() {
               styles.title,
               {
                 color: colors.text,
-                fontSize: fontSize['4xl'],
+                fontSize: fontSize['3xl'],
                 fontWeight: fontWeight.black,
               },
             ]}
           >
-            MindArena
+            Reset Password
           </Text>
           <Text
             style={[
               styles.subtitle,
               {
                 color: colors.textSecondary,
-                fontSize: fontSize.lg,
+                fontSize: fontSize.base,
                 fontWeight: fontWeight.medium,
               },
             ]}
           >
-            Challenge your mind daily
-          </Text>
-          <Text
-            style={[
-              styles.description,
-              {
-                color: colors.textTertiary,
-                fontSize: fontSize.sm,
-                marginTop: spacing.xs,
-              },
-            ]}
-          >
-            Solve puzzles, compete on the leaderboard, and track your progress
+            Enter your email to receive a password reset link
           </Text>
         </View>
 
-        {/* Auth Card */}
+        {/* Reset Form */}
         <Card style={styles.card}>
           {!success ? (
             <>
-              <Text
-                style={[
-                  styles.cardTitle,
-                  {
-                    color: colors.text,
-                    fontSize: fontSize.xl,
-                    fontWeight: fontWeight.bold,
-                    marginBottom: spacing.lg,
-                  },
-                ]}
-              >
-                Sign in with Email
-              </Text>
-
               <Input
                 label="Email Address"
                 value={email}
@@ -140,8 +114,8 @@ export default function SignIn() {
               />
 
               <Button
-                title={loading ? 'Sending...' : 'Send Magic Link'}
-                onPress={sendMagicLink}
+                title={loading ? 'Sending...' : 'Send Reset Link'}
+                onPress={handleResetPassword}
                 disabled={loading}
                 loading={loading}
                 fullWidth
@@ -158,24 +132,8 @@ export default function SignIn() {
                   },
                 ]}
               >
-                We'll send you a secure magic link to sign in instantly. No password needed!
+                We'll send you an email with instructions to reset your password
               </Text>
-
-              <View style={styles.divider}>
-                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-                <Text style={[styles.dividerText, { color: colors.textTertiary }]}>OR</Text>
-                <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              </View>
-
-              <Link href="/(auth)/sign-in-password" asChild>
-                <Button
-                  title="Sign in with Password"
-                  onPress={() => {}}
-                  variant="outline"
-                  fullWidth
-                  size="lg"
-                />
-              </Link>
             </>
           ) : (
             <View style={styles.successContainer}>
@@ -201,7 +159,7 @@ export default function SignIn() {
                   },
                 ]}
               >
-                We sent a magic link to{' '}
+                We sent a password reset link to{' '}
                 <Text style={{ fontWeight: fontWeight.bold, color: colors.primary }}>
                   {email}
                 </Text>
@@ -213,44 +171,37 @@ export default function SignIn() {
                 fullWidth
                 style={{ marginTop: spacing.lg }}
               />
+              <Button
+                title="Back to Sign In"
+                onPress={() => router.push('/(auth)')}
+                variant="secondary"
+                fullWidth
+                style={{ marginTop: spacing.sm }}
+              />
             </View>
           )}
         </Card>
 
-        {/* Features */}
-        <View style={styles.featuresContainer}>
-          <FeatureItem icon="🎯" text="Daily puzzles" colors={colors} />
-          <FeatureItem icon="🏆" text="Leaderboards" colors={colors} />
-          <FeatureItem icon="📊" text="Track progress" colors={colors} />
-        </View>
-
-        {/* Sign Up Link */}
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-            Don't have an account?{' '}
-          </Text>
-          <Link href="/(auth)/register" asChild>
-            <Text
-              style={[
-                styles.footerLink,
-                { color: colors.primary, fontWeight: fontWeight.bold },
-              ]}
-            >
-              Sign Up
+        {/* Back to Sign In Link */}
+        {!success && (
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+              Remember your password?{' '}
             </Text>
-          </Link>
-        </View>
+            <Link href="/(auth)" asChild>
+              <Text
+                style={[
+                  styles.footerLink,
+                  { color: colors.primary, fontWeight: fontWeight.bold },
+                ]}
+              >
+                Sign In
+              </Text>
+            </Link>
+          </View>
+        )}
       </View>
     </KeyboardAvoidingView>
-  );
-}
-
-function FeatureItem({ icon, text, colors }: { icon: string; text: string; colors: any }) {
-  return (
-    <View style={styles.featureItem}>
-      <Text style={styles.featureIcon}>{icon}</Text>
-      <Text style={[styles.featureText, { color: colors.textSecondary }]}>{text}</Text>
-    </View>
   );
 }
 
@@ -270,7 +221,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   logoEmoji: {
     fontSize: 40,
@@ -285,17 +236,11 @@ const styles = StyleSheet.create({
   subtitle: {
     textAlign: 'center',
     marginTop: spacing.xs,
-  },
-  description: {
-    textAlign: 'center',
     maxWidth: 400,
   },
   card: {
     width: '100%',
-    marginBottom: spacing.lg,
-  },
-  cardTitle: {
-    textAlign: 'center',
+    marginBottom: spacing.md,
   },
   helperText: {
     textAlign: 'center',
@@ -315,46 +260,11 @@ const styles = StyleSheet.create({
   successMessage: {
     textAlign: 'center',
   },
-  featuresContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.xl,
-    flexWrap: 'wrap',
-  },
-  featureItem: {
-    alignItems: 'center',
-    minWidth: 80,
-  },
-  featureIcon: {
-    fontSize: 24,
-    marginBottom: spacing.xs,
-  },
-  featureText: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.medium,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: spacing.lg,
-    gap: spacing.md,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.medium,
-  },
-  linkText: {
-    textDecorationLine: 'underline',
-  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
   },
   footerText: {
     fontSize: fontSize.sm,
