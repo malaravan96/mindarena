@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -11,6 +11,8 @@ function RootNavigator() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const { colors, colorScheme } = useTheme();
+  const router = useRouter();
+  const segments = useSegments();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -27,6 +29,18 @@ function RootNavigator() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!ready) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    if (!session && !inAuthGroup) {
+      router.replace('/(auth)');
+    } else if (session && inAuthGroup) {
+      router.replace('/(app)');
+    }
+  }, [session, ready, segments]);
+
   if (!ready) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -39,11 +53,8 @@ function RootNavigator() {
     <>
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }}>
-        {!session ? (
-          <Stack.Screen name="(auth)" />
-        ) : (
-          <Stack.Screen name="(app)" />
-        )}
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(app)" />
       </Stack>
     </>
   );
