@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
+import { showAlert, showConfirm } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
+import { ThemePicker } from '@/components/ThemePicker';
 import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
 
 type UserStats = {
@@ -99,7 +101,7 @@ export default function Profile() {
   async function save() {
     const trimmedName = displayName.trim();
     if (!trimmedName) {
-      Alert.alert('Invalid name', 'Display name cannot be empty');
+      showAlert('Invalid name', 'Display name cannot be empty');
       return;
     }
 
@@ -115,25 +117,42 @@ export default function Profile() {
       });
 
       if (error) throw error;
-      Alert.alert('Success', 'Profile updated successfully!');
+      showAlert('Success', 'Profile updated successfully!');
     } catch (e: any) {
-      Alert.alert('Save failed', e?.message ?? 'Unknown error');
+      showAlert('Save failed', e?.message ?? 'Unknown error');
     } finally {
       setSaving(false);
     }
   }
 
   async function signOut() {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-        },
-      },
-    ]);
+    const confirmed = await showConfirm('Sign out', 'Are you sure you want to sign out?', 'Sign out');
+    if (confirmed) {
+      await supabase.auth.signOut();
+    }
+  }
+
+  async function resetPassword() {
+    if (!email) {
+      showAlert('Error', 'No email found. Please sign in again.');
+      return;
+    }
+    const confirmed = await showConfirm(
+      'Reset Password',
+      `We will send a password reset link to ${email}. Continue?`,
+      'Send Link',
+    );
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'mindarena://reset-password',
+      });
+      if (error) throw error;
+      showAlert('Check your email', 'We sent you a password reset link.');
+    } catch (e: any) {
+      showAlert('Reset Failed', e?.message || 'Could not send reset email.');
+    }
   }
 
   const accuracy =
@@ -243,9 +262,9 @@ export default function Profile() {
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Appearance</Text>
           <View style={styles.themeRow}>
             {([
-              { key: 'light' as const, icon: '☀️', label: 'Light' },
-              { key: 'dark' as const, icon: '🌙', label: 'Dark' },
-              { key: 'auto' as const, icon: '⚙️', label: 'Auto' },
+              { key: 'light' as const, icon: '\u2600\uFE0F', label: 'Light' },
+              { key: 'dark' as const, icon: '\u{1F319}', label: 'Dark' },
+              { key: 'auto' as const, icon: '\u2699\uFE0F', label: 'Auto' },
             ]).map((t) => (
               <Pressable
                 key={t.key}
@@ -270,11 +289,23 @@ export default function Profile() {
               </Pressable>
             ))}
           </View>
+
+          <Text style={[styles.colorThemeLabel, { color: colors.textSecondary }]}>Color Theme</Text>
+          <ThemePicker />
         </Card>
 
-        {/* Sign Out */}
+        {/* Account Actions */}
         <Card style={styles.actionsCard}>
-          <Button title="Sign Out" onPress={signOut} variant="outline" fullWidth size="lg" />
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
+          <Button title="Reset Password" onPress={resetPassword} variant="outline" fullWidth size="lg" />
+          <Button
+            title="Sign Out"
+            onPress={signOut}
+            variant="outline"
+            fullWidth
+            size="lg"
+            style={{ marginTop: spacing.sm }}
+          />
         </Card>
 
         <View style={{ height: spacing.xl }} />
@@ -367,6 +398,7 @@ const styles = StyleSheet.create({
   },
   themeIcon: { fontSize: fontSize.xl, marginBottom: spacing.xs },
   themeLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  colorThemeLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, marginTop: spacing.lg, marginBottom: spacing.sm },
 
   actionsCard: { marginBottom: spacing.md },
 });

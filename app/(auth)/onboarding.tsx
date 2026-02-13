@@ -17,7 +17,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     title: 'Welcome to MindArena',
     description: 'Challenge your mind with daily puzzles and compete with others!',
-    icon: '🧠',
+    icon: '\u{1F9E0}',
     features: [
       'Solve unique puzzles every day',
       'Track your progress over time',
@@ -27,7 +27,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     title: 'Climb the Leaderboard',
     description: 'Compete with players around the world and prove your skills!',
-    icon: '🏆',
+    icon: '\u{1F3C6}',
     features: [
       'Earn points for correct answers',
       'Faster solutions = more points',
@@ -37,7 +37,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     title: 'Build Your Streak',
     description: 'Consistency is key! Solve puzzles daily to maintain your streak.',
-    icon: '🔥',
+    icon: '\u{1F525}',
     features: [
       'Daily puzzles to keep you sharp',
       'Streak bonuses for consistency',
@@ -88,7 +88,7 @@ export default function Onboarding() {
           </View>
         )}
 
-        {/* Progress Dots */}
+        {/* Progress Dots — themed */}
         <View style={styles.dotsContainer}>
           {ONBOARDING_STEPS.map((_, index) => (
             <View
@@ -105,45 +105,51 @@ export default function Onboarding() {
           ))}
         </View>
 
-        {/* Icon */}
-        <View style={[styles.iconContainer, { backgroundColor: `${colors.primary}20` }]}>
-          <Text style={styles.icon}>{step.icon}</Text>
+        {/* Pseudo-gradient header area */}
+        <View style={styles.headerWrap}>
+          <View style={[styles.headerBg, { backgroundColor: colors.gradientStart, opacity: 0.12 }]} />
+          <View style={[styles.headerBgEnd, { backgroundColor: colors.gradientEnd, opacity: 0.08 }]} />
+
+          {/* Icon */}
+          <View style={[styles.iconContainer, { backgroundColor: `${colors.primary}20` }]}>
+            <Text style={styles.icon}>{step.icon}</Text>
+          </View>
+
+          {/* Title */}
+          <Text
+            style={[
+              styles.title,
+              {
+                color: colors.text,
+                fontSize: fontSize['3xl'],
+                fontWeight: fontWeight.black,
+              },
+            ]}
+          >
+            {step.title}
+          </Text>
+
+          {/* Description */}
+          <Text
+            style={[
+              styles.description,
+              {
+                color: colors.textSecondary,
+                fontSize: fontSize.lg,
+                fontWeight: fontWeight.medium,
+              },
+            ]}
+          >
+            {step.description}
+          </Text>
         </View>
-
-        {/* Title */}
-        <Text
-          style={[
-            styles.title,
-            {
-              color: colors.text,
-              fontSize: fontSize['3xl'],
-              fontWeight: fontWeight.black,
-            },
-          ]}
-        >
-          {step.title}
-        </Text>
-
-        {/* Description */}
-        <Text
-          style={[
-            styles.description,
-            {
-              color: colors.textSecondary,
-              fontSize: fontSize.lg,
-              fontWeight: fontWeight.medium,
-            },
-          ]}
-        >
-          {step.description}
-        </Text>
 
         {/* Features */}
         <Card style={styles.featuresCard}>
           {step.features.map((feature, index) => (
             <View key={index} style={styles.featureItem}>
               <View style={[styles.featureBullet, { backgroundColor: colors.primary }]}>
-                <Text style={styles.featureBulletText}>✓</Text>
+                <Text style={styles.featureBulletText}>{'\u2713'}</Text>
               </View>
               <Text style={[styles.featureText, { color: colors.text }]}>{feature}</Text>
             </View>
@@ -152,10 +158,11 @@ export default function Onboarding() {
       </ScrollView>
 
       {/* Bottom Actions */}
-      <View style={[styles.bottomContainer, { backgroundColor: colors.surface }]}>
+      <View style={[styles.bottomContainer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
         <Button
           title={isLastStep ? "Let's Start!" : 'Next'}
           onPress={handleNext}
+          variant="gradient"
           fullWidth
           size="lg"
         />
@@ -191,6 +198,28 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: borderRadius.full,
   },
+  headerWrap: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: spacing.xl,
+  },
+  headerBg: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: borderRadius.lg,
+  },
+  headerBgEnd: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: '50%',
+    borderTopRightRadius: borderRadius.lg,
+    borderBottomRightRadius: borderRadius.lg,
+  },
   iconContainer: {
     width: 120,
     height: 120,
@@ -208,7 +237,6 @@ const styles = StyleSheet.create({
   },
   description: {
     textAlign: 'center',
-    marginBottom: spacing.xl,
     maxWidth: 400,
   },
   featuresCard: {
@@ -240,6 +268,5 @@ const styles = StyleSheet.create({
   bottomContainer: {
     padding: spacing.lg,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
   },
 });

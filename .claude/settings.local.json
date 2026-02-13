@@ -7,7 +7,9 @@
       "Bash(npx expo start:*)",
       "Bash(cat:*)",
       "Bash(npx expo:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(del \"C:\\\\Users\\\\Malar\\\\Desktop\\\\mindarena-mvp\\\\mindarena\\\\components\\\\PrimaryButton.tsx\")"
     ],
     "deny": [],
     "ask": []

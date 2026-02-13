@@ -1,9 +1,9 @@
 import React from 'react';
-import { Pressable, Text, StyleSheet, ViewStyle, ActivityIndicator } from 'react-native';
+import { Pressable, Text, StyleSheet, ViewStyle, ActivityIndicator, View } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost';
+type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'gradient';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps {
@@ -68,10 +68,16 @@ export function Button({
       borderColor: 'transparent',
       textColor: themeColors.primary,
     },
+    gradient: {
+      backgroundColor: 'transparent',
+      borderColor: 'transparent',
+      textColor: '#ffffff',
+    },
   };
 
   const currentSize = sizeStyles[size];
   const currentVariant = variantStyles[variant];
+  const isGradient = variant === 'gradient';
 
   return (
     <Pressable
@@ -82,16 +88,37 @@ export function Button({
         {
           paddingVertical: currentSize.paddingVertical,
           paddingHorizontal: currentSize.paddingHorizontal,
-          backgroundColor: currentVariant.backgroundColor,
+          backgroundColor: isGradient ? undefined : currentVariant.backgroundColor,
           borderColor: currentVariant.borderColor,
           borderRadius: borderRadius.md,
           borderWidth: variant === 'outline' ? 1 : 0,
           opacity: disabled || loading ? 0.5 : pressed ? 0.8 : 1,
           width: fullWidth ? '100%' : 'auto',
+          overflow: 'hidden' as const,
         },
         style,
       ]}
     >
+      {isGradient && (
+        <>
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: themeColors.gradientStart },
+            ]}
+          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: themeColors.gradientEnd,
+                opacity: 0.6,
+                left: '50%',
+              },
+            ]}
+          />
+        </>
+      )}
       {loading ? (
         <ActivityIndicator color={currentVariant.textColor} />
       ) : (

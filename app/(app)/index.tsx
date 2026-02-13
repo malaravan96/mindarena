@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  Alert,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
+import { showAlert, showConfirm } from '@/lib/alert';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { todayKey } from '@/lib/date';
 import { Button } from '@/components/Button';
@@ -151,7 +151,7 @@ export default function Home() {
         }
       } catch (e: any) {
         if (e?.code !== '23505') {
-          Alert.alert('Save failed', e?.message ?? 'Unknown error');
+          showAlert('Save failed', e?.message ?? 'Unknown error');
         }
       } finally {
         setSubmitting(false);
@@ -160,16 +160,10 @@ export default function Home() {
   }
 
   async function signOut() {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-        },
-      },
-    ]);
+    const confirmed = await showConfirm('Sign out', 'Are you sure you want to sign out?', 'Sign out');
+    if (confirmed) {
+      await supabase.auth.signOut();
+    }
   }
 
   const getPuzzleTypeColor = (type: string) => {

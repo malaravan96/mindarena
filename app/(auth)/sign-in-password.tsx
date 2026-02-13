@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
 import { validateEmail } from '@/lib/validation';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function SignInWithPassword() {
   const router = useRouter();
@@ -19,6 +23,7 @@ export default function SignInWithPassword() {
     password?: string;
   }>({});
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   async function handleSignIn() {
     const newErrors: typeof errors = {};
@@ -54,9 +59,9 @@ export default function SignInWithPassword() {
       router.replace('/(app)');
     } catch (e: any) {
       console.error('Sign in error:', e);
-      Alert.alert(
+      showAlert(
         'Sign In Failed',
-        e?.message || 'Invalid email or password. Please try again.'
+        e?.message || 'Invalid email or password. Please try again.',
       );
     } finally {
       setLoading(false);
@@ -70,44 +75,21 @@ export default function SignInWithPassword() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.wrap, { backgroundColor: colors.background }]}
     >
-      <View style={[styles.content, { maxWidth, width: '100%' }]}>
-        {/* App Icon/Logo */}
-        <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🧠</Text>
-        </View>
+      <ThemeAccessButton />
 
-        {/* Title Section */}
-        <View style={styles.headerSection}>
-          <Text
-            style={[
-              styles.title,
-              {
-                color: colors.text,
-                fontSize: fontSize['3xl'],
-                fontWeight: fontWeight.black,
-              },
-            ]}
-          >
-            Welcome Back
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.base,
-                fontWeight: fontWeight.medium,
-              },
-            ]}
-          >
-            Sign in to continue your mind challenge
-          </Text>
-        </View>
+      <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
+        <AuthHeader
+          icon={'\u{1F9E0}'}
+          title="Welcome Back"
+          subtitle="Sign in to continue your mind challenge"
+          onBack={() => router.back()}
+        />
 
         {/* Sign In Form */}
         <Card style={styles.card}>
           <Input
             label="Email Address"
+            icon={'\u2709'}
             value={email}
             onChangeText={(text) => {
               setEmail(text);
@@ -126,6 +108,7 @@ export default function SignInWithPassword() {
 
           <Input
             label="Password"
+            icon={'\u{1F512}'}
             value={password}
             onChangeText={(text) => {
               setPassword(text);
@@ -135,6 +118,7 @@ export default function SignInWithPassword() {
             }}
             placeholder="Enter your password"
             secureTextEntry
+            showPasswordToggle
             autoCapitalize="none"
             autoComplete="password"
             textContentType="password"
@@ -165,6 +149,7 @@ export default function SignInWithPassword() {
             onPress={handleSignIn}
             disabled={loading}
             loading={loading}
+            variant="gradient"
             fullWidth
             size="lg"
           />
@@ -202,7 +187,7 @@ export default function SignInWithPassword() {
             </Text>
           </Link>
         </View>
-      </View>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -216,29 +201,6 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     alignItems: 'center',
-  },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  subtitle: {
-    textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 400,
   },
   card: {
     width: '100%',

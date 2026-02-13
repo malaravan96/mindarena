@@ -1,18 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
 import { Container } from '@/components/Container';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function VerifyEmail() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   useEffect(() => {
     loadUserEmail();
@@ -25,7 +30,7 @@ export default function VerifyEmail() {
 
   async function resendVerification() {
     if (!email) {
-      Alert.alert('Error', 'No email found. Please sign in again.');
+      showAlert('Error', 'No email found. Please sign in again.');
       return;
     }
 
@@ -41,14 +46,13 @@ export default function VerifyEmail() {
 
       if (error) throw error;
 
-      Alert.alert(
+      showAlert(
         'Email Sent',
         'We sent you another verification email. Please check your inbox.',
-        [{ text: 'OK' }]
       );
     } catch (e: any) {
       console.error('Resend verification error:', e);
-      Alert.alert('Error', e?.message || 'Failed to resend verification email.');
+      showAlert('Error', e?.message || 'Failed to resend verification email.');
     } finally {
       setLoading(false);
     }
@@ -60,25 +64,14 @@ export default function VerifyEmail() {
 
   return (
     <Container style={styles.container}>
-      <View style={[styles.content, { backgroundColor: colors.background }]}>
-        {/* Icon */}
-        <View style={[styles.iconContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.icon}>📧</Text>
-        </View>
+      <ThemeAccessButton />
 
-        {/* Title */}
-        <Text
-          style={[
-            styles.title,
-            {
-              color: colors.text,
-              fontSize: fontSize['2xl'],
-              fontWeight: fontWeight.black,
-            },
-          ]}
-        >
-          Verify Your Email
-        </Text>
+      <Animated.View style={[styles.content, { backgroundColor: colors.background }, anim]}>
+        <AuthHeader
+          icon={'\u{1F4E7}'}
+          title="Verify Your Email"
+          subtitle="One last step to secure your account"
+        />
 
         {/* Message */}
         <Card style={styles.card}>
@@ -106,6 +99,7 @@ export default function VerifyEmail() {
             <Button
               title="Continue to App"
               onPress={skipVerification}
+              variant="gradient"
               fullWidth
             />
           </View>
@@ -123,7 +117,7 @@ export default function VerifyEmail() {
             You can verify your email later from your profile settings
           </Text>
         </Card>
-      </View>
+      </Animated.View>
     </Container>
   );
 }
@@ -137,21 +131,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
-  },
-  iconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  icon: {
-    fontSize: 48,
-  },
-  title: {
-    textAlign: 'center',
-    marginBottom: spacing.xl,
   },
   card: {
     width: '100%',

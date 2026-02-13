@@ -3,19 +3,24 @@ import {
   View,
   Text,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
+import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing, borderRadius, isDesktop, isTablet } from '@/constants/theme';
+import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
 import { validateEmail, validatePassword, validateUsername } from '@/lib/validation';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function Register() {
   const router = useRouter();
@@ -31,6 +36,7 @@ export default function Register() {
     username?: string;
   }>({});
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   function validateForm() {
     const newErrors: typeof errors = {};
@@ -77,14 +83,13 @@ export default function Register() {
       // Profile is auto-created by the database trigger (handle_new_user).
       // No manual insert needed here.
 
-      Alert.alert(
+      showAlert(
         'Registration Successful!',
         'Please check your email to verify your account. You can start using the app right away!',
-        [{ text: 'OK' }]
       );
     } catch (e: any) {
       const msg = e?.message || 'Something went wrong. Please try again.';
-      Alert.alert('Registration Failed', msg);
+      showAlert('Registration Failed', msg);
     } finally {
       setLoading(false);
     }
@@ -97,112 +102,122 @@ export default function Register() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.wrap, { backgroundColor: colors.background }]}
     >
+      <ThemeAccessButton />
+
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { maxWidth, width: '100%' }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Logo */}
-        <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🧠</Text>
-        </View>
-
-        {/* Title */}
-        <Text style={[styles.title, { color: colors.text, fontSize: fontSize['3xl'] }]}>
-          Create Account
-        </Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary, fontSize: fontSize.base }]}>
-          Join MindArena and start challenging your mind
-        </Text>
-
-        {/* Form */}
-        <Card style={styles.card}>
-          <Input
-            label="Username"
-            value={username}
-            onChangeText={(text) => {
-              setUsername(text);
-              if (errors.username) setErrors({ ...errors, username: undefined });
-            }}
-            placeholder="Choose a username"
-            autoCapitalize="none"
-            autoComplete="username"
-            textContentType="username"
-            error={errors.username}
-            editable={!loading}
+        <Animated.View style={[styles.inner, anim]}>
+          <AuthHeader
+            icon={'\u{1F9E0}'}
+            title="Create Account"
+            subtitle="Join MindArena and start challenging your mind"
+            onBack={() => router.back()}
           />
 
-          <Input
-            label="Email Address"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              if (errors.email) setErrors({ ...errors, email: undefined });
-            }}
-            placeholder="you@example.com"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="emailAddress"
-            error={errors.email}
-            editable={!loading}
-          />
+          {/* Form */}
+          <Card style={styles.card}>
+            <Input
+              label="Username"
+              icon="@"
+              value={username}
+              onChangeText={(text) => {
+                setUsername(text);
+                if (errors.username) setErrors({ ...errors, username: undefined });
+              }}
+              placeholder="Choose a username"
+              autoCapitalize="none"
+              autoComplete="username"
+              textContentType="username"
+              error={errors.username}
+              editable={!loading}
+            />
 
-          <Input
-            label="Password"
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              if (errors.password) setErrors({ ...errors, password: undefined });
-            }}
-            placeholder="Min 8 characters"
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete="password-new"
-            textContentType="newPassword"
-            error={errors.password}
-            editable={!loading}
-            helperText="Must include uppercase, lowercase, and a number"
-          />
+            <Input
+              label="Email Address"
+              icon={'\u2709'}
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (errors.email) setErrors({ ...errors, email: undefined });
+              }}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              error={errors.email}
+              editable={!loading}
+            />
 
-          <Input
-            label="Confirm Password"
-            value={confirmPassword}
-            onChangeText={(text) => {
-              setConfirmPassword(text);
-              if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
-            }}
-            placeholder="Re-enter your password"
-            secureTextEntry
-            autoCapitalize="none"
-            autoComplete="password-new"
-            textContentType="newPassword"
-            error={errors.confirmPassword}
-            editable={!loading}
-          />
+            <Input
+              label="Password"
+              icon={'\u{1F512}'}
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (errors.password) setErrors({ ...errors, password: undefined });
+              }}
+              placeholder="Min 8 characters"
+              secureTextEntry
+              showPasswordToggle
+              autoCapitalize="none"
+              autoComplete="password-new"
+              textContentType="newPassword"
+              error={errors.password}
+              editable={!loading}
+            />
 
-          <Button
-            title={loading ? 'Creating Account...' : 'Create Account'}
-            onPress={handleRegister}
-            disabled={loading}
-            loading={loading}
-            fullWidth
-            size="lg"
-            style={{ marginTop: spacing.sm }}
-          />
-        </Card>
+            <PasswordStrengthBar password={password} />
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-            Already have an account?{' '}
-          </Text>
-          <Link href="/(auth)" asChild>
-            <Text style={[styles.footerLink, { color: colors.primary, fontWeight: fontWeight.bold }]}>
-              Sign In
+            <Input
+              label="Confirm Password"
+              icon={'\u{1F512}'}
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+              }}
+              placeholder="Re-enter your password"
+              secureTextEntry
+              showPasswordToggle
+              autoCapitalize="none"
+              autoComplete="password-new"
+              textContentType="newPassword"
+              error={errors.confirmPassword}
+              editable={!loading}
+            />
+
+            <Button
+              title={loading ? 'Creating Account...' : 'Create Account'}
+              onPress={handleRegister}
+              disabled={loading}
+              loading={loading}
+              variant="gradient"
+              fullWidth
+              size="lg"
+              style={{ marginTop: spacing.sm }}
+            />
+          </Card>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+              Already have an account?{' '}
             </Text>
-          </Link>
-        </View>
+            <Link href="/(auth)" asChild>
+              <Text style={[styles.footerLink, { color: colors.primary, fontWeight: fontWeight.bold }]}>
+                Sign In
+              </Text>
+            </Link>
+          </View>
+
+          <Text style={[styles.trustText, { color: colors.textTertiary }]}>
+            {'\u{1F512}'} Your data is safe and encrypted
+          </Text>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -217,21 +232,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignSelf: 'center',
   },
-  logoContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    justifyContent: 'center',
+  inner: {
+    width: '100%',
     alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  logoEmoji: { fontSize: 36 },
-  title: { fontWeight: fontWeight.black, textAlign: 'center' },
-  subtitle: {
-    fontWeight: fontWeight.medium,
-    textAlign: 'center',
-    marginTop: spacing.xs,
-    marginBottom: spacing.xl,
   },
   card: { width: '100%', marginBottom: spacing.md },
   footer: {
@@ -242,4 +245,9 @@ const styles = StyleSheet.create({
   },
   footerText: { fontSize: fontSize.sm },
   footerLink: { fontSize: fontSize.sm },
+  trustText: {
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+    marginTop: spacing.md,
+  },
 });

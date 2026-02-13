@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
+import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
 import { validatePassword } from '@/lib/validation';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function ResetPassword() {
   const router = useRouter();
@@ -19,6 +24,7 @@ export default function ResetPassword() {
     confirmPassword?: string;
   }>({});
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   async function handleUpdatePassword() {
     const newErrors: typeof errors = {};
@@ -45,21 +51,16 @@ export default function ResetPassword() {
 
       if (updateError) throw updateError;
 
-      Alert.alert(
+      showAlert(
         'Password Updated!',
-        'Your password has been successfully updated. You can now sign in with your new password.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(app)'),
-          },
-        ]
+        'Your password has been successfully updated.',
       );
+      router.replace('/(app)');
     } catch (e: any) {
       console.error('Password update error:', e);
-      Alert.alert(
+      showAlert(
         'Update Failed',
-        e?.message || 'Could not update password. Please try again.'
+        e?.message || 'Could not update password. Please try again.',
       );
     } finally {
       setLoading(false);
@@ -73,44 +74,21 @@ export default function ResetPassword() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.wrap, { backgroundColor: colors.background }]}
     >
-      <View style={[styles.content, { maxWidth, width: '100%' }]}>
-        {/* App Icon/Logo */}
-        <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🔒</Text>
-        </View>
+      <ThemeAccessButton />
 
-        {/* Title Section */}
-        <View style={styles.headerSection}>
-          <Text
-            style={[
-              styles.title,
-              {
-                color: colors.text,
-                fontSize: fontSize['3xl'],
-                fontWeight: fontWeight.black,
-              },
-            ]}
-          >
-            Create New Password
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.base,
-                fontWeight: fontWeight.medium,
-              },
-            ]}
-          >
-            Enter your new password below
-          </Text>
-        </View>
+      <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
+        <AuthHeader
+          icon={'\u{1F512}'}
+          title="Create New Password"
+          subtitle="Enter your new password below"
+          onBack={() => router.back()}
+        />
 
         {/* Reset Form */}
         <Card style={styles.card}>
           <Input
             label="New Password"
+            icon={'\u{1F512}'}
             value={password}
             onChangeText={(text) => {
               setPassword(text);
@@ -120,6 +98,7 @@ export default function ResetPassword() {
             }}
             placeholder="Min 8 characters"
             secureTextEntry
+            showPasswordToggle
             autoCapitalize="none"
             autoComplete="password-new"
             textContentType="newPassword"
@@ -127,8 +106,11 @@ export default function ResetPassword() {
             editable={!loading}
           />
 
+          <PasswordStrengthBar password={password} />
+
           <Input
             label="Confirm New Password"
+            icon={'\u{1F512}'}
             value={confirmPassword}
             onChangeText={(text) => {
               setConfirmPassword(text);
@@ -138,6 +120,7 @@ export default function ResetPassword() {
             }}
             placeholder="Re-enter your new password"
             secureTextEntry
+            showPasswordToggle
             autoCapitalize="none"
             autoComplete="password-new"
             textContentType="newPassword"
@@ -150,6 +133,7 @@ export default function ResetPassword() {
             onPress={handleUpdatePassword}
             disabled={loading}
             loading={loading}
+            variant="gradient"
             fullWidth
             size="lg"
             style={{ marginTop: spacing.sm }}
@@ -168,7 +152,7 @@ export default function ResetPassword() {
             Password must be at least 8 characters with uppercase, lowercase, and a number
           </Text>
         </Card>
-      </View>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -182,29 +166,6 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     alignItems: 'center',
-  },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  subtitle: {
-    textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 400,
   },
   card: {
     width: '100%',

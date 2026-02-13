@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
 import { validateEmail } from '@/lib/validation';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function ForgotPassword() {
   const router = useRouter();
@@ -16,6 +20,7 @@ export default function ForgotPassword() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   async function handleResetPassword() {
     const emailError = validateEmail(email);
@@ -35,17 +40,16 @@ export default function ForgotPassword() {
       if (resetError) throw resetError;
 
       setSuccess(true);
-      Alert.alert(
+      showAlert(
         'Check your email',
         'We sent you a password reset link. Click it to create a new password.',
-        [{ text: 'OK' }]
       );
     } catch (e: any) {
       console.error('Password reset error:', e);
       setError(e?.message || 'Something went wrong. Please try again.');
-      Alert.alert(
+      showAlert(
         'Reset Failed',
-        e?.message || 'Could not send reset email. Please try again.'
+        e?.message || 'Could not send reset email. Please try again.',
       );
     } finally {
       setLoading(false);
@@ -59,39 +63,15 @@ export default function ForgotPassword() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.wrap, { backgroundColor: colors.background }]}
     >
-      <View style={[styles.content, { maxWidth, width: '100%' }]}>
-        {/* App Icon/Logo */}
-        <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🔑</Text>
-        </View>
+      <ThemeAccessButton />
 
-        {/* Title Section */}
-        <View style={styles.headerSection}>
-          <Text
-            style={[
-              styles.title,
-              {
-                color: colors.text,
-                fontSize: fontSize['3xl'],
-                fontWeight: fontWeight.black,
-              },
-            ]}
-          >
-            Reset Password
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.base,
-                fontWeight: fontWeight.medium,
-              },
-            ]}
-          >
-            Enter your email to receive a password reset link
-          </Text>
-        </View>
+      <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
+        <AuthHeader
+          icon={'\u{1F511}'}
+          title="Reset Password"
+          subtitle="Enter your email to receive a password reset link"
+          onBack={() => router.back()}
+        />
 
         {/* Reset Form */}
         <Card style={styles.card}>
@@ -99,6 +79,7 @@ export default function ForgotPassword() {
             <>
               <Input
                 label="Email Address"
+                icon={'\u2709'}
                 value={email}
                 onChangeText={(text) => {
                   setEmail(text);
@@ -118,6 +99,7 @@ export default function ForgotPassword() {
                 onPress={handleResetPassword}
                 disabled={loading}
                 loading={loading}
+                variant="gradient"
                 fullWidth
                 size="lg"
               />
@@ -137,7 +119,9 @@ export default function ForgotPassword() {
             </>
           ) : (
             <View style={styles.successContainer}>
-              <Text style={styles.successEmoji}>✉️</Text>
+              <View style={[styles.successCircle, { backgroundColor: `${colors.success}20` }]}>
+                <Text style={styles.successEmoji}>{'\u2705'}</Text>
+              </View>
               <Text
                 style={[
                   styles.successTitle,
@@ -148,7 +132,7 @@ export default function ForgotPassword() {
                   },
                 ]}
               >
-                Check your email!
+                Email sent!
               </Text>
               <Text
                 style={[
@@ -174,7 +158,7 @@ export default function ForgotPassword() {
               <Button
                 title="Back to Sign In"
                 onPress={() => router.push('/(auth)')}
-                variant="secondary"
+                variant="gradient"
                 fullWidth
                 style={{ marginTop: spacing.sm }}
               />
@@ -200,7 +184,7 @@ export default function ForgotPassword() {
             </Link>
           </View>
         )}
-      </View>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -215,29 +199,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: 'center',
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  subtitle: {
-    textAlign: 'center',
-    marginTop: spacing.xs,
-    maxWidth: 400,
-  },
   card: {
     width: '100%',
     marginBottom: spacing.md,
@@ -249,9 +210,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.lg,
   },
-  successEmoji: {
-    fontSize: 48,
+  successCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: spacing.md,
+  },
+  successEmoji: {
+    fontSize: 36,
   },
   successTitle: {
     textAlign: 'center',

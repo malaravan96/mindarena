@@ -64,19 +64,34 @@ export default function Leaderboard() {
 
       const { data, error } = await supabase
         .from('attempts')
-        .select('user_id, ms_taken, created_at, profiles(username, display_name)')
+        .select('user_id, ms_taken, created_at')
         .eq('puzzle_id', puzzle.id)
         .eq('is_correct', true)
         .order('ms_taken', { ascending: true })
         .limit(100);
 
       if (error) throw error;
-      // Supabase joins return profiles as array; normalize to single object
-      const normalized = (data ?? []).map((d: any) => ({
-        ...d,
-        profiles: Array.isArray(d.profiles) ? d.profiles[0] ?? null : d.profiles,
+
+      const attempts = data ?? [];
+      const userIds = [...new Set(attempts.map((a: any) => a.user_id))];
+
+      let profilesMap: Record<string, { username: string | null; display_name: string | null }> = {};
+      if (userIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, username, display_name')
+          .in('id', userIds);
+
+        for (const p of profilesData ?? []) {
+          profilesMap[p.id] = { username: p.username, display_name: p.display_name };
+        }
+      }
+
+      const normalized: Row[] = attempts.map((a: any) => ({
+        ...a,
+        profiles: profilesMap[a.user_id] ?? null,
       }));
-      setRows(normalized as Row[]);
+      setRows(normalized);
     } catch (e: any) {
       console.error('Leaderboard error:', e?.message);
       setRows([]);

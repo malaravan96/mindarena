@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { Link } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { AuthHeader } from '@/components/AuthHeader';
+import { ThemeAccessButton } from '@/components/ThemeAccessButton';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
+import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
@@ -14,6 +18,7 @@ export default function SignIn() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const { colors } = useTheme();
+  const anim = useEntryAnimation();
 
   async function sendMagicLink() {
     const v = email.trim();
@@ -39,14 +44,10 @@ export default function SignIn() {
       });
       if (authError) throw authError;
       setSuccess(true);
-      Alert.alert(
-        'Check your email',
-        'We sent you a magic link. Click it to sign in instantly!',
-        [{ text: 'OK' }]
-      );
+      showAlert('Check your email', 'We sent you a magic link. Click it to sign in instantly!');
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong. Please try again.');
-      Alert.alert('Sign-in failed', e?.message ?? 'Unknown error');
+      showAlert('Sign-in failed', e?.message ?? 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -59,51 +60,14 @@ export default function SignIn() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.wrap, { backgroundColor: colors.background }]}
     >
-      <View style={[styles.content, { maxWidth, width: '100%' }]}>
-        {/* App Icon/Logo */}
-        <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-          <Text style={styles.logoEmoji}>🧠</Text>
-        </View>
+      <ThemeAccessButton />
 
-        {/* Title Section */}
-        <View style={styles.headerSection}>
-          <Text
-            style={[
-              styles.title,
-              {
-                color: colors.text,
-                fontSize: fontSize['4xl'],
-                fontWeight: fontWeight.black,
-              },
-            ]}
-          >
-            MindArena
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.lg,
-                fontWeight: fontWeight.medium,
-              },
-            ]}
-          >
-            Challenge your mind daily
-          </Text>
-          <Text
-            style={[
-              styles.description,
-              {
-                color: colors.textTertiary,
-                fontSize: fontSize.sm,
-                marginTop: spacing.xs,
-              },
-            ]}
-          >
-            Solve puzzles, compete on the leaderboard, and track your progress
-          </Text>
-        </View>
+      <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
+        <AuthHeader
+          icon={'\u{1F9E0}'}
+          title="MindArena"
+          subtitle="Challenge your mind daily"
+        />
 
         {/* Auth Card */}
         <Card style={styles.card}>
@@ -125,6 +89,7 @@ export default function SignIn() {
 
               <Input
                 label="Email Address"
+                icon={'\u2709'}
                 value={email}
                 onChangeText={(text) => {
                   setEmail(text);
@@ -144,6 +109,7 @@ export default function SignIn() {
                 onPress={sendMagicLink}
                 disabled={loading}
                 loading={loading}
+                variant="gradient"
                 fullWidth
                 size="lg"
               />
@@ -179,7 +145,7 @@ export default function SignIn() {
             </>
           ) : (
             <View style={styles.successContainer}>
-              <Text style={styles.successEmoji}>✉️</Text>
+              <Text style={styles.successEmoji}>{'\u2709\uFE0F'}</Text>
               <Text
                 style={[
                   styles.successTitle,
@@ -219,9 +185,9 @@ export default function SignIn() {
 
         {/* Features */}
         <View style={styles.featuresContainer}>
-          <FeatureItem icon="🎯" text="Daily puzzles" colors={colors} />
-          <FeatureItem icon="🏆" text="Leaderboards" colors={colors} />
-          <FeatureItem icon="📊" text="Track progress" colors={colors} />
+          <FeatureItem icon={'\u{1F3AF}'} text="Daily puzzles" colors={colors} />
+          <FeatureItem icon={'\u{1F3C6}'} text="Leaderboards" colors={colors} />
+          <FeatureItem icon={'\u{1F4CA}'} text="Track progress" colors={colors} />
         </View>
 
         {/* Sign Up Link */}
@@ -240,7 +206,12 @@ export default function SignIn() {
             </Text>
           </Link>
         </View>
-      </View>
+
+        {/* Trust indicator */}
+        <Text style={[styles.trustText, { color: colors.textTertiary }]}>
+          {'\u{1F512}'} Secured with end-to-end encryption
+        </Text>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -263,32 +234,6 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     alignItems: 'center',
-  },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  subtitle: {
-    textAlign: 'center',
-    marginTop: spacing.xs,
-  },
-  description: {
-    textAlign: 'center',
-    maxWidth: 400,
   },
   card: {
     width: '100%',
@@ -347,9 +292,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontWeight: fontWeight.medium,
   },
-  linkText: {
-    textDecorationLine: 'underline',
-  },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -361,5 +303,10 @@ const styles = StyleSheet.create({
   },
   footerLink: {
     fontSize: fontSize.sm,
+  },
+  trustText: {
+    fontSize: fontSize.xs,
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
 });
