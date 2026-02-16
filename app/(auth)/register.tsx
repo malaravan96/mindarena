@@ -67,7 +67,6 @@ export default function Register() {
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo: 'mindarena://',
           data: {
             username: username.trim(),
           },
@@ -85,8 +84,9 @@ export default function Register() {
 
       showAlert(
         'Registration Successful!',
-        'Please check your email to verify your account. You can start using the app right away!',
+        'We sent a verification code to your email. Please verify to complete your account.',
       );
+      router.push('/(auth)/verify-email');
     } catch (e: any) {
       const msg = e?.message || 'Something went wrong. Please try again.';
       showAlert('Registration Failed', msg);

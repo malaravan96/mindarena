@@ -162,7 +162,7 @@ export default function SignInWithPassword() {
 
           <Link href="/(auth)" asChild>
             <Button
-              title="Sign in with Magic Link"
+              title="Sign in with Email Code"
               onPress={() => {}}
               variant="outline"
               fullWidth

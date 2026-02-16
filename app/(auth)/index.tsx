@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
-import { Link } from 'expo-router';
+import React, { useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
+  TextInput,
+} from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -12,15 +20,20 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
 import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
+const OTP_LENGTH = 6;
+
 export default function SignIn() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
+  const [step, setStep] = useState<'email' | 'otp'>('email');
+  const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
+  const otpRefs = useRef<(TextInput | null)[]>([]);
   const { colors } = useTheme();
   const anim = useEntryAnimation();
 
-  async function sendMagicLink() {
+  async function sendOtpCode() {
     const v = email.trim();
     setError('');
 
@@ -38,16 +51,96 @@ export default function SignIn() {
     try {
       const { error: authError } = await supabase.auth.signInWithOtp({
         email: v,
-        options: {
-          emailRedirectTo: 'mindarena://',
-        },
       });
       if (authError) throw authError;
-      setSuccess(true);
-      showAlert('Check your email', 'We sent you a magic link. Click it to sign in instantly!');
+      setStep('otp');
+      showAlert('Code Sent!', 'We sent a 6-digit verification code to your email.');
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong. Please try again.');
-      showAlert('Sign-in failed', e?.message ?? 'Unknown error');
+      showAlert('Failed to Send Code', e?.message ?? 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifyOtp() {
+    const code = otp.join('');
+    if (code.length !== OTP_LENGTH) {
+      setError('Please enter the full 6-digit code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: code,
+        type: 'email',
+      });
+
+      if (verifyError) throw verifyError;
+
+      router.replace('/(app)');
+    } catch (e: any) {
+      console.error('OTP verification error:', e);
+      setError(e?.message || 'Invalid or expired code. Please try again.');
+      showAlert(
+        'Verification Failed',
+        e?.message || 'Invalid or expired code. Please try again.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleOtpChange(text: string, index: number) {
+    setError('');
+    const newOtp = [...otp];
+
+    if (text.length > 1) {
+      const digits = text.replace(/[^0-9]/g, '').slice(0, OTP_LENGTH);
+      for (let i = 0; i < OTP_LENGTH; i++) {
+        newOtp[i] = digits[i] || '';
+      }
+      setOtp(newOtp);
+      const focusIndex = Math.min(digits.length, OTP_LENGTH - 1);
+      otpRefs.current[focusIndex]?.focus();
+      return;
+    }
+
+    const digit = text.replace(/[^0-9]/g, '');
+    newOtp[index] = digit;
+    setOtp(newOtp);
+
+    if (digit && index < OTP_LENGTH - 1) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  }
+
+  function handleOtpKeyPress(key: string, index: number) {
+    if (key === 'Backspace' && !otp[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+      const newOtp = [...otp];
+      newOtp[index - 1] = '';
+      setOtp(newOtp);
+    }
+  }
+
+  async function handleResendCode() {
+    setLoading(true);
+    setError('');
+    setOtp(Array(OTP_LENGTH).fill(''));
+
+    try {
+      const { error: authError } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+      });
+      if (authError) throw authError;
+      showAlert('Code Resent!', 'A new verification code has been sent to your email.');
+    } catch (e: any) {
+      setError(e?.message || 'Failed to resend code.');
     } finally {
       setLoading(false);
     }
@@ -66,12 +159,25 @@ export default function SignIn() {
         <AuthHeader
           icon={'\u{1F9E0}'}
           title="MindArena"
-          subtitle="Challenge your mind daily"
+          subtitle={
+            step === 'email'
+              ? 'Challenge your mind daily'
+              : `Enter the code sent to ${email}`
+          }
+          onBack={
+            step === 'otp'
+              ? () => {
+                  setStep('email');
+                  setOtp(Array(OTP_LENGTH).fill(''));
+                  setError('');
+                }
+              : undefined
+          }
         />
 
         {/* Auth Card */}
         <Card style={styles.card}>
-          {!success ? (
+          {step === 'email' ? (
             <>
               <Text
                 style={[
@@ -105,8 +211,8 @@ export default function SignIn() {
               />
 
               <Button
-                title={loading ? 'Sending...' : 'Send Magic Link'}
-                onPress={sendMagicLink}
+                title={loading ? 'Sending...' : 'Send Verification Code'}
+                onPress={sendOtpCode}
                 disabled={loading}
                 loading={loading}
                 variant="gradient"
@@ -124,7 +230,7 @@ export default function SignIn() {
                   },
                 ]}
               >
-                We'll send you a secure magic link to sign in instantly. No password needed!
+                We'll send you a 6-digit code to sign in instantly. No password needed!
               </Text>
 
               <View style={styles.divider}>
@@ -144,51 +250,106 @@ export default function SignIn() {
               </Link>
             </>
           ) : (
-            <View style={styles.successContainer}>
-              <Text style={styles.successEmoji}>{'\u2709\uFE0F'}</Text>
+            <>
               <Text
                 style={[
-                  styles.successTitle,
+                  styles.cardTitle,
                   {
                     color: colors.text,
                     fontSize: fontSize.xl,
                     fontWeight: fontWeight.bold,
+                    marginBottom: spacing.lg,
                   },
                 ]}
               >
-                Check your email!
+                Enter Verification Code
               </Text>
-              <Text
-                style={[
-                  styles.successMessage,
-                  {
-                    color: colors.textSecondary,
-                    fontSize: fontSize.base,
-                  },
-                ]}
-              >
-                We sent a magic link to{' '}
-                <Text style={{ fontWeight: fontWeight.bold, color: colors.primary }}>
-                  {email}
+
+              {/* OTP Input Boxes */}
+              <View style={styles.otpContainer}>
+                {otp.map((digit, index) => (
+                  <TextInput
+                    key={index}
+                    ref={(ref) => {
+                      otpRefs.current[index] = ref;
+                    }}
+                    style={[
+                      styles.otpBox,
+                      {
+                        borderColor: digit
+                          ? colors.primary
+                          : error
+                          ? colors.error
+                          : colors.border,
+                        backgroundColor: colors.surface,
+                        color: colors.text,
+                      },
+                    ]}
+                    value={digit}
+                    onChangeText={(text) => handleOtpChange(text, index)}
+                    onKeyPress={({ nativeEvent }) =>
+                      handleOtpKeyPress(nativeEvent.key, index)
+                    }
+                    keyboardType="number-pad"
+                    maxLength={index === 0 ? OTP_LENGTH : 1}
+                    selectTextOnFocus
+                    editable={!loading}
+                    autoFocus={index === 0}
+                  />
+                ))}
+              </View>
+
+              {error ? (
+                <Text
+                  style={[
+                    styles.errorText,
+                    { color: colors.error, fontSize: fontSize.sm },
+                  ]}
+                >
+                  {error}
                 </Text>
-              </Text>
+              ) : null}
+
               <Button
-                title="Send another link"
-                onPress={() => setSuccess(false)}
-                variant="outline"
+                title={loading ? 'Verifying...' : 'Verify & Sign In'}
+                onPress={handleVerifyOtp}
+                disabled={loading || otp.join('').length !== OTP_LENGTH}
+                loading={loading}
+                variant="gradient"
                 fullWidth
-                style={{ marginTop: spacing.lg }}
+                size="lg"
+                style={{ marginTop: spacing.md }}
               />
-            </View>
+
+              <View style={styles.resendRow}>
+                <Text style={[styles.resendText, { color: colors.textSecondary }]}>
+                  Didn't receive the code?{' '}
+                </Text>
+                <Text
+                  onPress={!loading ? handleResendCode : undefined}
+                  style={[
+                    styles.resendLink,
+                    {
+                      color: loading ? colors.textSecondary : colors.primary,
+                      fontWeight: fontWeight.bold,
+                    },
+                  ]}
+                >
+                  Resend
+                </Text>
+              </View>
+            </>
           )}
         </Card>
 
         {/* Features */}
-        <View style={styles.featuresContainer}>
-          <FeatureItem icon={'\u{1F3AF}'} text="Daily puzzles" colors={colors} />
-          <FeatureItem icon={'\u{1F3C6}'} text="Leaderboards" colors={colors} />
-          <FeatureItem icon={'\u{1F4CA}'} text="Track progress" colors={colors} />
-        </View>
+        {step === 'email' && (
+          <View style={styles.featuresContainer}>
+            <FeatureItem icon={'\u{1F3AF}'} text="Daily puzzles" colors={colors} />
+            <FeatureItem icon={'\u{1F3C6}'} text="Leaderboards" colors={colors} />
+            <FeatureItem icon={'\u{1F4CA}'} text="Track progress" colors={colors} />
+          </View>
+        )}
 
         {/* Sign Up Link */}
         <View style={styles.footer}>
@@ -245,20 +406,37 @@ const styles = StyleSheet.create({
   helperText: {
     textAlign: 'center',
   },
-  successContainer: {
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
-  },
-  successEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  successTitle: {
-    textAlign: 'center',
+  otpContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
     marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
-  successMessage: {
+  otpBox: {
+    width: 48,
+    height: 56,
+    borderWidth: 2,
+    borderRadius: 12,
     textAlign: 'center',
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  errorText: {
+    textAlign: 'center',
+    marginTop: spacing.xs,
+  },
+  resendRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  resendText: {
+    fontSize: fontSize.sm,
+  },
+  resendLink: {
+    fontSize: fontSize.sm,
   },
   featuresContainer: {
     flexDirection: 'row',
