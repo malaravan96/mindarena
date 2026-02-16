@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -144,7 +145,7 @@ export default function VerifyEmail() {
 
       <Animated.View style={[styles.content, { backgroundColor: colors.background }, anim]}>
         <AuthHeader
-          icon={'\u{1F4E7}'}
+          icon={<Ionicons name="mail-open-outline" size={34} color="#ffffff" />}
           title="Verify Your Email"
           subtitle="One last step to secure your account"
         />

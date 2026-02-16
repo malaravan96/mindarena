@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -9,50 +10,57 @@ import { fontSize, fontWeight, spacing, borderRadius } from '@/constants/theme';
 interface OnboardingStep {
   title: string;
   description: string;
-  icon: string;
+  icon: React.ReactNode;
+  iconBg: string;
   features: string[];
 }
 
-const ONBOARDING_STEPS: OnboardingStep[] = [
-  {
-    title: 'Welcome to MindArena',
-    description: 'Challenge your mind with daily puzzles and compete with others!',
-    icon: '\u{1F9E0}',
-    features: [
-      'Solve unique puzzles every day',
-      'Track your progress over time',
-      'Build your solving streak',
-    ],
-  },
-  {
-    title: 'Climb the Leaderboard',
-    description: 'Compete with players around the world and prove your skills!',
-    icon: '\u{1F3C6}',
-    features: [
-      'Earn points for correct answers',
-      'Faster solutions = more points',
-      'See your global ranking',
-    ],
-  },
-  {
-    title: 'Build Your Streak',
-    description: 'Consistency is key! Solve puzzles daily to maintain your streak.',
-    icon: '\u{1F525}',
-    features: [
-      'Daily puzzles to keep you sharp',
-      'Streak bonuses for consistency',
-      'Track your improvement',
-    ],
-  },
-];
+function getSteps(primaryColor: string): OnboardingStep[] {
+  return [
+    {
+      title: 'Welcome to MindArena',
+      description: 'Challenge your mind with daily puzzles and compete with others!',
+      icon: <MaterialCommunityIcons name="brain" size={56} color="#ffffff" />,
+      iconBg: primaryColor,
+      features: [
+        'Solve unique puzzles every day',
+        'Track your progress over time',
+        'Build your solving streak',
+      ],
+    },
+    {
+      title: 'Climb the Leaderboard',
+      description: 'Compete with players around the world and prove your skills!',
+      icon: <Ionicons name="trophy" size={56} color="#ffffff" />,
+      iconBg: '#f59e0b',
+      features: [
+        'Earn points for correct answers',
+        'Faster solutions = more points',
+        'See your global ranking',
+      ],
+    },
+    {
+      title: 'Build Your Streak',
+      description: 'Consistency is key! Solve puzzles daily to maintain your streak.',
+      icon: <Ionicons name="flame" size={56} color="#ffffff" />,
+      iconBg: '#ef4444',
+      features: [
+        'Daily puzzles to keep you sharp',
+        'Streak bonuses for consistency',
+        'Track your improvement',
+      ],
+    },
+  ];
+}
 
 export default function Onboarding() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const { colors } = useTheme();
 
-  const isLastStep = currentStep === ONBOARDING_STEPS.length - 1;
-  const step = ONBOARDING_STEPS[currentStep];
+  const steps = getSteps(colors.primary);
+  const isLastStep = currentStep === steps.length - 1;
+  const step = steps[currentStep];
 
   function handleNext() {
     if (isLastStep) {
@@ -88,9 +96,9 @@ export default function Onboarding() {
           </View>
         )}
 
-        {/* Progress Dots — themed */}
+        {/* Progress Dots */}
         <View style={styles.dotsContainer}>
-          {ONBOARDING_STEPS.map((_, index) => (
+          {steps.map((_, index) => (
             <View
               key={index}
               style={[
@@ -105,14 +113,14 @@ export default function Onboarding() {
           ))}
         </View>
 
-        {/* Pseudo-gradient header area */}
+        {/* Header area */}
         <View style={styles.headerWrap}>
           <View style={[styles.headerBg, { backgroundColor: colors.gradientStart, opacity: 0.12 }]} />
           <View style={[styles.headerBgEnd, { backgroundColor: colors.gradientEnd, opacity: 0.08 }]} />
 
           {/* Icon */}
-          <View style={[styles.iconContainer, { backgroundColor: `${colors.primary}20` }]}>
-            <Text style={styles.icon}>{step.icon}</Text>
+          <View style={[styles.iconContainer, { backgroundColor: step.iconBg }]}>
+            {step.icon}
           </View>
 
           {/* Title */}
@@ -149,7 +157,7 @@ export default function Onboarding() {
           {step.features.map((feature, index) => (
             <View key={index} style={styles.featureItem}>
               <View style={[styles.featureBullet, { backgroundColor: colors.primary }]}>
-                <Text style={styles.featureBulletText}>{'\u2713'}</Text>
+                <Ionicons name="checkmark" size={16} color="#ffffff" />
               </View>
               <Text style={[styles.featureText, { color: colors.text }]}>{feature}</Text>
             </View>
@@ -228,9 +236,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xl,
   },
-  icon: {
-    fontSize: 64,
-  },
   title: {
     textAlign: 'center',
     marginBottom: spacing.md,
@@ -255,11 +260,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  featureBulletText: {
-    color: '#ffffff',
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
   },
   featureText: {
     fontSize: fontSize.base,

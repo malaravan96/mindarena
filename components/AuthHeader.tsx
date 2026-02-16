@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 
 interface AuthHeaderProps {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   subtitle?: string;
   onBack?: () => void;
@@ -21,14 +22,18 @@ export function AuthHeader({ icon, title, subtitle, onBack }: AuthHeaderProps) {
 
       {/* Back button */}
       {onBack && (
-        <Pressable onPress={onBack} style={styles.backBtn} hitSlop={12}>
-          <Text style={[styles.backArrow, { color: colors.text }]}>{'\u2190'}</Text>
+        <Pressable
+          onPress={onBack}
+          style={[styles.backBtn, { backgroundColor: `${colors.text}10` }]}
+          hitSlop={12}
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.text} />
         </Pressable>
       )}
 
       {/* Icon circle */}
       <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
-        <Text style={styles.iconText}>{icon}</Text>
+        {icon}
       </View>
 
       {/* Title */}
@@ -78,10 +83,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  backArrow: {
-    fontSize: 22,
-    fontWeight: fontWeight.bold,
-  },
   iconCircle: {
     width: 72,
     height: 72,
@@ -89,9 +90,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
-  },
-  iconText: {
-    fontSize: 36,
   },
   title: {
     fontSize: fontSize['3xl'],

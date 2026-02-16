@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, TextInput, Text, StyleSheet, TextInputProps, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 
@@ -7,7 +8,7 @@ interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
   helperText?: string;
-  icon?: string;
+  icon?: React.ReactNode;
   showPasswordToggle?: boolean;
 }
 
@@ -55,7 +56,7 @@ export function Input({
         ]}
       >
         {icon && (
-          <Text style={[styles.icon, { color: colors.textTertiary }]}>{icon}</Text>
+          <View style={styles.iconWrap}>{icon}</View>
         )}
         <TextInput
           {...props}
@@ -86,9 +87,11 @@ export function Input({
             style={styles.toggleBtn}
             hitSlop={8}
           >
-            <Text style={[styles.toggleIcon, { color: colors.textTertiary }]}>
-              {passwordVisible ? '\u{1F441}' : '\u{1F441}\u{200D}\u{1F5E8}'}
-            </Text>
+            <Ionicons
+              name={passwordVisible ? 'eye-outline' : 'eye-off-outline'}
+              size={20}
+              color={colors.textTertiary}
+            />
           </Pressable>
         )}
       </View>
@@ -134,10 +137,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
   },
-  icon: {
-    fontSize: 18,
+  iconWrap: {
     paddingLeft: spacing.md,
     marginRight: spacing.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   input: {
     flex: 1,
@@ -148,9 +152,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  toggleIcon: {
-    fontSize: 18,
   },
   helperText: {},
 });

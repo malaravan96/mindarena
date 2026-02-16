@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -78,7 +79,7 @@ export default function ResetPassword() {
 
       <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
         <AuthHeader
-          icon={'\u{1F512}'}
+          icon={<Ionicons name="lock-open-outline" size={34} color="#ffffff" />}
           title="Create New Password"
           subtitle="Enter your new password below"
           onBack={() => router.back()}
@@ -88,7 +89,7 @@ export default function ResetPassword() {
         <Card style={styles.card}>
           <Input
             label="New Password"
-            icon={'\u{1F512}'}
+            icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
             value={password}
             onChangeText={(text) => {
               setPassword(text);
@@ -110,7 +111,7 @@ export default function ResetPassword() {
 
           <Input
             label="Confirm New Password"
-            icon={'\u{1F512}'}
+            icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
             value={confirmPassword}
             onChangeText={(text) => {
               setConfirmPassword(text);
@@ -139,18 +140,20 @@ export default function ResetPassword() {
             style={{ marginTop: spacing.sm }}
           />
 
-          <Text
-            style={[
-              styles.helperText,
-              {
-                color: colors.textSecondary,
-                fontSize: fontSize.xs,
-                marginTop: spacing.md,
-              },
-            ]}
-          >
-            Password must be at least 8 characters with uppercase, lowercase, and a number
-          </Text>
+          <View style={styles.helperRow}>
+            <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
+            <Text
+              style={[
+                styles.helperText,
+                {
+                  color: colors.textSecondary,
+                  fontSize: fontSize.xs,
+                },
+              ]}
+            >
+              Password must be at least 8 characters with uppercase, lowercase, and a number
+            </Text>
+          </View>
         </Card>
       </Animated.View>
     </KeyboardAvoidingView>
@@ -170,7 +173,15 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
   },
+  helperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
   helperText: {
     textAlign: 'center',
+    flex: 1,
   },
 });

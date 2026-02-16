@@ -9,6 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -111,7 +112,7 @@ export default function Register() {
       >
         <Animated.View style={[styles.inner, anim]}>
           <AuthHeader
-            icon={'\u{1F9E0}'}
+            icon={<Ionicons name="person-add-outline" size={34} color="#ffffff" />}
             title="Create Account"
             subtitle="Join MindArena and start challenging your mind"
             onBack={() => router.back()}
@@ -121,7 +122,7 @@ export default function Register() {
           <Card style={styles.card}>
             <Input
               label="Username"
-              icon="@"
+              icon={<Ionicons name="at" size={18} color={colors.textTertiary} />}
               value={username}
               onChangeText={(text) => {
                 setUsername(text);
@@ -137,7 +138,7 @@ export default function Register() {
 
             <Input
               label="Email Address"
-              icon={'\u2709'}
+              icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
               value={email}
               onChangeText={(text) => {
                 setEmail(text);
@@ -154,7 +155,7 @@ export default function Register() {
 
             <Input
               label="Password"
-              icon={'\u{1F512}'}
+              icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
               value={password}
               onChangeText={(text) => {
                 setPassword(text);
@@ -174,7 +175,7 @@ export default function Register() {
 
             <Input
               label="Confirm Password"
-              icon={'\u{1F512}'}
+              icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
               value={confirmPassword}
               onChangeText={(text) => {
                 setConfirmPassword(text);
@@ -214,9 +215,12 @@ export default function Register() {
             </Link>
           </View>
 
-          <Text style={[styles.trustText, { color: colors.textTertiary }]}>
-            {'\u{1F512}'} Your data is safe and encrypted
-          </Text>
+          <View style={styles.trustRow}>
+            <Ionicons name="shield-checkmark-outline" size={14} color={colors.textTertiary} />
+            <Text style={[styles.trustText, { color: colors.textTertiary }]}>
+              Your data is safe and encrypted
+            </Text>
+          </View>
         </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -245,9 +249,14 @@ const styles = StyleSheet.create({
   },
   footerText: { fontSize: fontSize.sm },
   footerLink: { fontSize: fontSize.sm },
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
   trustText: {
     fontSize: fontSize.xs,
-    textAlign: 'center',
-    marginTop: spacing.md,
   },
 });

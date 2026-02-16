@@ -9,6 +9,7 @@ import {
   TextInput,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -157,7 +158,7 @@ export default function SignIn() {
 
       <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
         <AuthHeader
-          icon={'\u{1F9E0}'}
+          icon={<MaterialCommunityIcons name="brain" size={36} color="#ffffff" />}
           title="MindArena"
           subtitle={
             step === 'email'
@@ -195,7 +196,7 @@ export default function SignIn() {
 
               <Input
                 label="Email Address"
-                icon={'\u2709'}
+                icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
                 value={email}
                 onChangeText={(text) => {
                   setEmail(text);
@@ -345,9 +346,21 @@ export default function SignIn() {
         {/* Features */}
         {step === 'email' && (
           <View style={styles.featuresContainer}>
-            <FeatureItem icon={'\u{1F3AF}'} text="Daily puzzles" colors={colors} />
-            <FeatureItem icon={'\u{1F3C6}'} text="Leaderboards" colors={colors} />
-            <FeatureItem icon={'\u{1F4CA}'} text="Track progress" colors={colors} />
+            <FeatureItem
+              icon={<Ionicons name="game-controller-outline" size={22} color={colors.primary} />}
+              text="Daily puzzles"
+              colors={colors}
+            />
+            <FeatureItem
+              icon={<Ionicons name="trophy-outline" size={22} color={colors.primary} />}
+              text="Leaderboards"
+              colors={colors}
+            />
+            <FeatureItem
+              icon={<Ionicons name="bar-chart-outline" size={22} color={colors.primary} />}
+              text="Track progress"
+              colors={colors}
+            />
           </View>
         )}
 
@@ -369,18 +382,31 @@ export default function SignIn() {
         </View>
 
         {/* Trust indicator */}
-        <Text style={[styles.trustText, { color: colors.textTertiary }]}>
-          {'\u{1F512}'} Secured with end-to-end encryption
-        </Text>
+        <View style={styles.trustRow}>
+          <Ionicons name="shield-checkmark-outline" size={14} color={colors.textTertiary} />
+          <Text style={[styles.trustText, { color: colors.textTertiary }]}>
+            Secured with end-to-end encryption
+          </Text>
+        </View>
       </Animated.View>
     </KeyboardAvoidingView>
   );
 }
 
-function FeatureItem({ icon, text, colors }: { icon: string; text: string; colors: any }) {
+function FeatureItem({
+  icon,
+  text,
+  colors,
+}: {
+  icon: React.ReactNode;
+  text: string;
+  colors: any;
+}) {
   return (
     <View style={styles.featureItem}>
-      <Text style={styles.featureIcon}>{icon}</Text>
+      <View style={[styles.featureIconWrap, { backgroundColor: `${colors.primary}15` }]}>
+        {icon}
+      </View>
       <Text style={[styles.featureText, { color: colors.textSecondary }]}>{text}</Text>
     </View>
   );
@@ -448,8 +474,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minWidth: 80,
   },
-  featureIcon: {
-    fontSize: 24,
+  featureIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: spacing.xs,
   },
   featureText: {
@@ -482,9 +512,14 @@ const styles = StyleSheet.create({
   footerLink: {
     fontSize: fontSize.sm,
   },
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
   trustText: {
     fontSize: fontSize.xs,
-    textAlign: 'center',
-    marginTop: spacing.md,
   },
 });

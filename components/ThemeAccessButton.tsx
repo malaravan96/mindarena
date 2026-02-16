@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, Modal, StyleSheet, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemePicker } from '@/components/ThemePicker';
 import { borderRadius, fontSize, fontWeight, spacing, shadows } from '@/constants/theme';
@@ -22,7 +23,7 @@ export function ThemeAccessButton() {
         ]}
         hitSlop={8}
       >
-        <Text style={[styles.fabIcon, { color: colors.primary }]}>{'\u{1F3A8}'}</Text>
+        <Ionicons name="color-palette-outline" size={20} color={colors.primary} />
       </Pressable>
 
       <Modal

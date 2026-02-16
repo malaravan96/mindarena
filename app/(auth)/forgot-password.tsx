@@ -9,6 +9,7 @@ import {
   TextInput,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -162,7 +163,11 @@ export default function ForgotPassword() {
 
       <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
         <AuthHeader
-          icon={step === 'email' ? '\u{1F511}' : '\u{1F4E7}'}
+          icon={
+            step === 'email'
+              ? <Ionicons name="key-outline" size={34} color="#ffffff" />
+              : <Ionicons name="mail-open-outline" size={34} color="#ffffff" />
+          }
           title={step === 'email' ? 'Reset Password' : 'Enter Verification Code'}
           subtitle={
             step === 'email'
@@ -185,7 +190,7 @@ export default function ForgotPassword() {
             <>
               <Input
                 label="Email Address"
-                icon={'\u2709'}
+                icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
                 value={email}
                 onChangeText={(text) => {
                   setEmail(text);

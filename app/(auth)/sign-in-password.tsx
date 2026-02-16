@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
@@ -79,7 +80,7 @@ export default function SignInWithPassword() {
 
       <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
         <AuthHeader
-          icon={'\u{1F9E0}'}
+          icon={<Ionicons name="log-in-outline" size={34} color="#ffffff" />}
           title="Welcome Back"
           subtitle="Sign in to continue your mind challenge"
           onBack={() => router.back()}
@@ -89,7 +90,7 @@ export default function SignInWithPassword() {
         <Card style={styles.card}>
           <Input
             label="Email Address"
-            icon={'\u2709'}
+            icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
             value={email}
             onChangeText={(text) => {
               setEmail(text);
@@ -108,7 +109,7 @@ export default function SignInWithPassword() {
 
           <Input
             label="Password"
-            icon={'\u{1F512}'}
+            icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
             value={password}
             onChangeText={(text) => {
               setPassword(text);

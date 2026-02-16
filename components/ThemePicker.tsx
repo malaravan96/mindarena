@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Pressable, Text, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { colorThemeList, borderRadius, spacing, fontSize, fontWeight } from '@/constants/theme';
 
@@ -34,7 +35,7 @@ export function ThemePicker({ compact }: ThemePickerProps) {
             ]}
             onPress={() => setColorTheme(t.id)}
           >
-            {isActive && <Text style={styles.check}>{'\u2713'}</Text>}
+            {isActive && <Ionicons name="checkmark" size={18} color="#ffffff" />}
           </Pressable>
         );
       })}
