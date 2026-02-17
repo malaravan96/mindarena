@@ -87,7 +87,7 @@ export default function Register() {
         'Registration Successful!',
         'We sent a verification code to your email. Please verify to complete your account.',
       );
-      router.push('/(auth)/verify-email');
+      router.push({ pathname: '/(auth)/verify-email', params: { email: email.trim() } });
     } catch (e: any) {
       const msg = e?.message || 'Something went wrong. Please try again.';
       showAlert('Registration Failed', msg);

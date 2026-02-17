@@ -33,10 +33,12 @@ function RootNavigator() {
     if (!ready) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const onVerifyEmail = (segments as string[])[1] === 'verify-email';
 
     if (!session && !inAuthGroup) {
       router.replace('/(auth)');
-    } else if (session && inAuthGroup) {
+    } else if (session && inAuthGroup && !onVerifyEmail) {
+      // Don't redirect away from verify-email — let the user finish verification
       router.replace('/(app)');
     }
   }, [session, ready, segments]);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -17,8 +17,9 @@ const OTP_LENGTH = 6;
 
 export default function VerifyEmail() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string }>();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(params.email || '');
   const [error, setError] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpRefs = useRef<(TextInput | null)[]>([]);
@@ -26,12 +27,17 @@ export default function VerifyEmail() {
   const anim = useEntryAnimation();
 
   useEffect(() => {
-    loadUserEmail();
+    // If email wasn't passed as a param, try to get it from the session
+    if (!email) {
+      loadUserEmail();
+    }
   }, []);
 
   async function loadUserEmail() {
     const { data } = await supabase.auth.getUser();
-    setEmail(data.user?.email || '');
+    if (data.user?.email) {
+      setEmail(data.user.email);
+    }
   }
 
   async function handleVerifyCode() {

@@ -21,7 +21,7 @@ export interface Puzzle {
   date_key: string;
   title: string;
   prompt: string;
-  type: 'logic' | 'pattern' | 'math' | 'reasoning';
+  type: 'logic' | 'pattern' | 'math' | 'reasoning' | 'word' | 'memory' | 'visual' | 'spatial' | 'trivia';
   options: string[];
   answer_index: number;
   difficulty?: 'easy' | 'medium' | 'hard';

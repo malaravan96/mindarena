@@ -60,6 +60,21 @@ export default function SignInWithPassword() {
       router.replace('/(app)');
     } catch (e: any) {
       console.error('Sign in error:', e);
+
+      // If email is not confirmed, resend the code and go to verify screen
+      if (e?.message?.toLowerCase().includes('email not confirmed')) {
+        try {
+          await supabase.auth.resend({ type: 'signup', email: email.trim() });
+        } catch { /* ignore resend error */ }
+        showAlert(
+          'Email Not Verified',
+          'We sent a new verification code to your email. Please verify to continue.',
+        );
+        router.push({ pathname: '/(auth)/verify-email', params: { email: email.trim() } });
+        setLoading(false);
+        return;
+      }
+
       showAlert(
         'Sign In Failed',
         e?.message || 'Invalid email or password. Please try again.',

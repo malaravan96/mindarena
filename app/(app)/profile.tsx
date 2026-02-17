@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
-import { showAlert, showConfirm } from '@/lib/alert';
+import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
-import { ThemePicker } from '@/components/ThemePicker';
 import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
 
 type UserStats = {
@@ -20,14 +19,35 @@ type UserStats = {
   total_points: number;
 };
 
+type PuzzleAttempt = {
+  id: string;
+  is_correct: boolean;
+  ms_taken: number;
+  created_at: string;
+  puzzle_title: string;
+  puzzle_type: string;
+};
+
+type Achievement = {
+  id: string;
+  title: string;
+  description: string;
+  emoji: string;
+  unlocked: boolean;
+};
+
 export default function Profile() {
-  const router = useRouter();
-  const { colors, setTheme, theme } = useTheme();
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [bio, setBio] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [recentAttempts, setRecentAttempts] = useState<PuzzleAttempt[]>([]);
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [stats, setStats] = useState<UserStats>({
     total_attempts: 0,
     correct_attempts: 0,
@@ -49,31 +69,35 @@ export default function Profile() {
       const uid = userData.user?.id;
       if (!uid) return;
 
-      // Load profile (including streak and points from DB)
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('username, display_name, total_points, streak_count')
+        .select('username, display_name, total_points, streak_count, avatar_url, bio')
         .eq('id', uid)
         .maybeSingle<{
           username: string | null;
           display_name: string | null;
           total_points: number;
           streak_count: number;
+          avatar_url: string | null;
+          bio: string | null;
         }>();
 
       if (profileData) {
         setUsername(profileData.username ?? '');
         setDisplayName(profileData.display_name ?? '');
+        setAvatarUrl(profileData.avatar_url ?? null);
+        setBio(profileData.bio ?? '');
       }
 
-      // Load attempt stats
       const { data: attemptsData } = await supabase
         .from('attempts')
-        .select('ms_taken, is_correct')
-        .eq('user_id', uid);
+        .select('id, ms_taken, is_correct, created_at, puzzle_id')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(20);
 
-      const correctAttempts = attemptsData?.filter((a) => a.is_correct) ?? [];
-      const totalAttempts = attemptsData?.length ?? 0;
+      const allAttempts = attemptsData ?? [];
+      const correctAttempts = allAttempts.filter((a) => a.is_correct);
       const avgTime =
         correctAttempts.length > 0
           ? correctAttempts.reduce((sum, a) => sum + a.ms_taken, 0) / correctAttempts.length
@@ -84,17 +108,144 @@ export default function Profile() {
           : 0;
 
       setStats({
-        total_attempts: totalAttempts,
+        total_attempts: allAttempts.length,
         correct_attempts: correctAttempts.length,
         avg_time: avgTime,
         best_time: bestTime,
         streak: profileData?.streak_count ?? 0,
         total_points: profileData?.total_points ?? 0,
       });
+
+      // Build recent attempts with puzzle info
+      if (allAttempts.length > 0) {
+        const puzzleIds = [...new Set(allAttempts.map((a) => a.puzzle_id))];
+        const { data: puzzlesData } = await supabase
+          .from('puzzles')
+          .select('id, title, type')
+          .in('id', puzzleIds);
+
+        const puzzleMap: Record<string, { title: string; type: string }> = {};
+        for (const p of puzzlesData ?? []) {
+          puzzleMap[p.id] = { title: p.title, type: p.type };
+        }
+
+        setRecentAttempts(
+          allAttempts.slice(0, 10).map((a) => ({
+            id: a.id,
+            is_correct: a.is_correct,
+            ms_taken: a.ms_taken,
+            created_at: a.created_at,
+            puzzle_title: puzzleMap[a.puzzle_id]?.title ?? 'Puzzle',
+            puzzle_type: puzzleMap[a.puzzle_id]?.type ?? 'unknown',
+          })),
+        );
+      }
+
+      // Compute achievements
+      const totalCorrect = correctAttempts.length;
+      const streak = profileData?.streak_count ?? 0;
+      const fastSolve = bestTime > 0 && bestTime < 10000;
+
+      setAchievements([
+        {
+          id: 'first-solve',
+          title: 'First Solve',
+          description: 'Solve your first puzzle',
+          emoji: '🎯',
+          unlocked: totalCorrect >= 1,
+        },
+        {
+          id: 'five-streak',
+          title: '5-Day Streak',
+          description: 'Maintain a 5-day solving streak',
+          emoji: '🔥',
+          unlocked: streak >= 5,
+        },
+        {
+          id: 'speed-demon',
+          title: 'Speed Demon',
+          description: 'Solve a puzzle in under 10 seconds',
+          emoji: '⚡',
+          unlocked: fastSolve,
+        },
+        {
+          id: 'ten-correct',
+          title: 'Sharp Mind',
+          description: 'Get 10 puzzles correct',
+          emoji: '🧠',
+          unlocked: totalCorrect >= 10,
+        },
+        {
+          id: 'perfectionist',
+          title: 'Perfectionist',
+          description: 'Achieve 100% accuracy (min 5 attempts)',
+          emoji: '💎',
+          unlocked: allAttempts.length >= 5 && totalCorrect === allAttempts.length,
+        },
+        {
+          id: 'dedicated',
+          title: 'Dedicated',
+          description: 'Attempt 20 puzzles',
+          emoji: '🏅',
+          unlocked: allAttempts.length >= 20,
+        },
+      ]);
     } catch (e: any) {
       console.error('Profile load error:', e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function pickAvatar() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+
+      if (result.canceled || !result.assets[0]) return;
+
+      setUploadingAvatar(true);
+      const asset = result.assets[0];
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) throw new Error('Not signed in');
+
+      const filePath = `${uid}.jpg`;
+
+      // Fetch the image as a blob and upload
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const arrayBuffer = await new Response(blob).arrayBuffer();
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, arrayBuffer, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      // Append cache-buster so the image refreshes
+      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', uid);
+
+      if (updateError) throw updateError;
+
+      setAvatarUrl(publicUrl);
+    } catch (e: any) {
+      showAlert('Upload failed', e?.message ?? 'Could not upload avatar');
+    } finally {
+      setUploadingAvatar(false);
     }
   }
 
@@ -114,6 +265,8 @@ export default function Profile() {
       const { error } = await supabase.from('profiles').upsert({
         id: uid,
         display_name: trimmedName,
+        username: username.trim() || null,
+        bio: bio.trim() || null,
       });
 
       if (error) throw error;
@@ -122,36 +275,6 @@ export default function Profile() {
       showAlert('Save failed', e?.message ?? 'Unknown error');
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function signOut() {
-    const confirmed = await showConfirm('Sign out', 'Are you sure you want to sign out?', 'Sign out');
-    if (confirmed) {
-      await supabase.auth.signOut();
-    }
-  }
-
-  async function resetPassword() {
-    if (!email) {
-      showAlert('Error', 'No email found. Please sign in again.');
-      return;
-    }
-    const confirmed = await showConfirm(
-      'Reset Password',
-      `We will send a password reset link to ${email}. Continue?`,
-      'Send Link',
-    );
-    if (!confirmed) return;
-
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'mindarena://reset-password',
-      });
-      if (error) throw error;
-      showAlert('Check your email', 'We sent you a password reset link.');
-    } catch (e: any) {
-      showAlert('Reset Failed', e?.message || 'Could not send reset email.');
     }
   }
 
@@ -171,13 +294,8 @@ export default function Profile() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={[styles.backText, { color: colors.text }]}>←</Text>
-        </Pressable>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
-        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
@@ -188,12 +306,24 @@ export default function Profile() {
         {/* Avatar & Name */}
         <Card style={styles.profileCard}>
           <View style={styles.avatarSection}>
-            <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-            {username ? (
-              <Text style={[styles.username, { color: colors.textSecondary }]}>@{username}</Text>
-            ) : null}
+            <Pressable onPress={pickAvatar} disabled={uploadingAvatar} style={styles.avatarWrapper}>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.avatarText}>{initials}</Text>
+                </View>
+              )}
+              {uploadingAvatar ? (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              ) : (
+                <View style={styles.avatarOverlay}>
+                  <Text style={styles.avatarOverlayText}>Change{'\n'}Photo</Text>
+                </View>
+              )}
+            </Pressable>
             <Text style={[styles.email, { color: colors.textTertiary }]}>{email}</Text>
           </View>
 
@@ -203,6 +333,25 @@ export default function Profile() {
             onChangeText={setDisplayName}
             placeholder="Enter your display name"
             autoCapitalize="words"
+            editable={!saving}
+          />
+
+          <Input
+            label="Username"
+            value={username}
+            onChangeText={setUsername}
+            placeholder="Choose a username"
+            autoCapitalize="none"
+            editable={!saving}
+          />
+
+          <Input
+            label="Bio"
+            value={bio}
+            onChangeText={setBio}
+            placeholder="Tell us about yourself"
+            multiline
+            numberOfLines={3}
             editable={!saving}
           />
 
@@ -228,7 +377,7 @@ export default function Profile() {
             <View style={[styles.pointsDivider, { backgroundColor: colors.border }]} />
             <View style={styles.pointsCol}>
               <Text style={[styles.pointsValue, { color: '#f59e0b' }]}>
-                {stats.streak > 0 ? `${stats.streak}🔥` : '-'}
+                {stats.streak > 0 ? `${stats.streak}` : '-'}
               </Text>
               <Text style={[styles.pointsLabel, { color: colors.textSecondary }]}>Day Streak</Text>
             </View>
@@ -257,55 +406,90 @@ export default function Profile() {
           </View>
         </Card>
 
-        {/* Theme */}
-        <Card style={styles.themeCard}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Appearance</Text>
-          <View style={styles.themeRow}>
-            {([
-              { key: 'light' as const, icon: '\u2600\uFE0F', label: 'Light' },
-              { key: 'dark' as const, icon: '\u{1F319}', label: 'Dark' },
-              { key: 'auto' as const, icon: '\u2699\uFE0F', label: 'Auto' },
-            ]).map((t) => (
-              <Pressable
-                key={t.key}
+        {/* Achievements */}
+        <Card style={styles.achievementsCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Achievements</Text>
+          <View style={styles.achievementsGrid}>
+            {achievements.map((a) => (
+              <View
+                key={a.id}
                 style={[
-                  styles.themeOption,
+                  styles.achievementBadge,
                   {
-                    borderColor: theme === t.key ? colors.primary : colors.border,
-                    backgroundColor: theme === t.key ? `${colors.primary}10` : colors.surface,
+                    backgroundColor: a.unlocked ? `${colors.primary}10` : colors.surfaceVariant,
+                    borderColor: a.unlocked ? colors.primary : colors.border,
                   },
                 ]}
-                onPress={() => setTheme(t.key)}
               >
-                <Text style={styles.themeIcon}>{t.icon}</Text>
+                <Text style={[styles.achievementEmoji, { opacity: a.unlocked ? 1 : 0.3 }]}>
+                  {a.emoji}
+                </Text>
                 <Text
                   style={[
-                    styles.themeLabel,
-                    { color: theme === t.key ? colors.primary : colors.text },
+                    styles.achievementTitle,
+                    { color: a.unlocked ? colors.text : colors.textTertiary },
                   ]}
+                  numberOfLines={1}
                 >
-                  {t.label}
+                  {a.title}
                 </Text>
-              </Pressable>
+                <Text
+                  style={[
+                    styles.achievementDesc,
+                    { color: a.unlocked ? colors.textSecondary : colors.textTertiary },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {a.description}
+                </Text>
+                {a.unlocked && (
+                  <View style={[styles.unlockedBadge, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.unlockedText}>Unlocked</Text>
+                  </View>
+                )}
+              </View>
             ))}
           </View>
-
-          <Text style={[styles.colorThemeLabel, { color: colors.textSecondary }]}>Color Theme</Text>
-          <ThemePicker />
         </Card>
 
-        {/* Account Actions */}
-        <Card style={styles.actionsCard}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
-          <Button title="Reset Password" onPress={resetPassword} variant="outline" fullWidth size="lg" />
-          <Button
-            title="Sign Out"
-            onPress={signOut}
-            variant="outline"
-            fullWidth
-            size="lg"
-            style={{ marginTop: spacing.sm }}
-          />
+        {/* Puzzle History */}
+        <Card style={styles.historyCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Puzzles</Text>
+          {recentAttempts.length === 0 ? (
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No puzzle attempts yet. Solve your first puzzle!
+            </Text>
+          ) : (
+            recentAttempts.map((attempt) => (
+              <View
+                key={attempt.id}
+                style={[styles.historyRow, { borderBottomColor: colors.border }]}
+              >
+                <View
+                  style={[
+                    styles.historyIndicator,
+                    { backgroundColor: attempt.is_correct ? colors.correct : colors.wrong },
+                  ]}
+                />
+                <View style={styles.historyInfo}>
+                  <Text style={[styles.historyTitle, { color: colors.text }]} numberOfLines={1}>
+                    {attempt.puzzle_title}
+                  </Text>
+                  <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>
+                    {new Date(attempt.created_at).toLocaleDateString()} · {(attempt.ms_taken / 1000).toFixed(1)}s
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.historyResult,
+                    { color: attempt.is_correct ? colors.correct : colors.wrong },
+                  ]}
+                >
+                  {attempt.is_correct ? 'Correct' : 'Wrong'}
+                </Text>
+              </View>
+            ))
+          )}
         </Card>
 
         <View style={{ height: spacing.xl }} />
@@ -348,15 +532,11 @@ const statStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderBottomWidth: 1,
+    alignItems: 'center',
   },
-  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  backText: { fontSize: fontSize['2xl'] },
   headerTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
 
   scroll: { flex: 1 },
@@ -364,16 +544,39 @@ const styles = StyleSheet.create({
 
   profileCard: { alignItems: 'center', marginBottom: spacing.md },
   avatarSection: { alignItems: 'center', marginBottom: spacing.lg },
+  avatarWrapper: {
+    width: 96,
+    height: 96,
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  avatarImage: {
+    width: 96,
+    height: 96,
+    borderRadius: borderRadius.full,
+  },
   avatar: {
-    width: 88,
-    height: 88,
+    width: 96,
+    height: 96,
     borderRadius: borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.sm,
   },
   avatarText: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black, color: '#fff' },
-  username: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
+  avatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: borderRadius.full,
+  },
+  avatarOverlayText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    textAlign: 'center',
+  },
   email: { fontSize: fontSize.sm, marginTop: 2 },
 
   pointsBanner: { marginBottom: spacing.md },
@@ -387,18 +590,42 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.md },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
 
-  themeCard: { marginBottom: spacing.md },
-  themeRow: { flexDirection: 'row', gap: spacing.sm },
-  themeOption: {
-    flex: 1,
+  achievementsCard: { marginBottom: spacing.md },
+  achievementsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  achievementBadge: {
+    width: '47%' as any,
     padding: spacing.md,
     borderRadius: borderRadius.md,
-    borderWidth: 2,
+    borderWidth: 1,
     alignItems: 'center',
   },
-  themeIcon: { fontSize: fontSize.xl, marginBottom: spacing.xs },
-  themeLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-  colorThemeLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, marginTop: spacing.lg, marginBottom: spacing.sm },
+  achievementEmoji: { fontSize: 32, marginBottom: spacing.xs },
+  achievementTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.bold, marginBottom: 2, textAlign: 'center' },
+  achievementDesc: { fontSize: fontSize.xs, textAlign: 'center' },
+  unlockedBadge: {
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  unlockedText: { color: '#fff', fontSize: fontSize.xs, fontWeight: fontWeight.bold },
 
-  actionsCard: { marginBottom: spacing.md },
+  historyCard: { marginBottom: spacing.md },
+  emptyText: { fontSize: fontSize.base, textAlign: 'center', paddingVertical: spacing.lg },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    gap: spacing.sm,
+  },
+  historyIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: borderRadius.full,
+  },
+  historyInfo: { flex: 1 },
+  historyTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
+  historyMeta: { fontSize: fontSize.xs, marginTop: 2 },
+  historyResult: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
 });

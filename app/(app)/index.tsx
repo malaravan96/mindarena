@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,13 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
-import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
+import { offlinePuzzles, Puzzle, PuzzleType } from '@/lib/puzzles';
 import { todayKey } from '@/lib/date';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -34,6 +35,27 @@ type ExistingAttempt = {
   ms_taken: number;
 };
 
+const puzzleCategories: { type: PuzzleType; emoji: string; label: string; color: string }[] = [
+  { type: 'pattern', emoji: '🔍', label: 'Pattern', color: '#f59e0b' },
+  { type: 'logic', emoji: '🧩', label: 'Logic', color: '#8b5cf6' },
+  { type: 'math', emoji: '🔢', label: 'Math', color: '#10b981' },
+  { type: 'word', emoji: '📝', label: 'Word', color: '#3b82f6' },
+  { type: 'memory', emoji: '🧠', label: 'Memory', color: '#ec4899' },
+  { type: 'visual', emoji: '👁', label: 'Visual', color: '#06b6d4' },
+  { type: 'spatial', emoji: '🔄', label: 'Spatial', color: '#f97316' },
+  { type: 'trivia', emoji: '💡', label: 'Trivia', color: '#a855f7' },
+];
+
+const dailyTips = [
+  'Regular puzzle-solving can improve cognitive flexibility and problem-solving skills.',
+  'Taking short breaks between puzzles helps your brain consolidate what you learned.',
+  'Try to solve puzzles at the same time each day to build a healthy habit.',
+  'Working on different puzzle types exercises different parts of your brain.',
+  'Speed improves with practice — focus on accuracy first, then build speed.',
+  'Discuss puzzles with friends to see different approaches and learn new strategies.',
+  'Sleep plays a crucial role in memory consolidation — rest well to think well!',
+];
+
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -45,9 +67,14 @@ export default function Home() {
   const [status, setStatus] = useState<'idle' | 'correct' | 'wrong'>('idle');
   const [loading, setLoading] = useState(true);
   const [existingAttempt, setExistingAttempt] = useState<ExistingAttempt | null>(null);
+  const [userStreak, setUserStreak] = useState(0);
+  const [userPoints, setUserPoints] = useState(0);
+  const [solversCount, setSolversCount] = useState(0);
+  const [userRank, setUserRank] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const dayKey = useMemo(() => todayKey(), []);
+  const dailyTip = useMemo(() => dailyTips[new Date().getDate() % dailyTips.length], []);
 
   // Live timer
   useEffect(() => {
@@ -63,7 +90,29 @@ export default function Home() {
 
   useEffect(() => {
     loadPuzzle();
+    loadUserInfo();
   }, [dayKey]);
+
+  async function loadUserInfo() {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) return;
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('total_points, streak_count')
+        .eq('id', uid)
+        .maybeSingle<{ total_points: number; streak_count: number }>();
+
+      if (profileData) {
+        setUserStreak(profileData.streak_count ?? 0);
+        setUserPoints(profileData.total_points ?? 0);
+      }
+    } catch {
+      // silently fail
+    }
+  }
 
   async function loadPuzzle() {
     setLoading(true);
@@ -89,7 +138,15 @@ export default function Home() {
         };
         setPuzzle(p);
 
-        // Check if user already attempted this puzzle
+        // Load solvers count
+        const { count } = await supabase
+          .from('attempts')
+          .select('*', { count: 'exact', head: true })
+          .eq('puzzle_id', data.id)
+          .eq('is_correct', true);
+        setSolversCount(count ?? 0);
+
+        // Check existing attempt & rank
         const { data: userData } = await supabase.auth.getUser();
         const uid = userData.user?.id;
         if (uid) {
@@ -105,6 +162,17 @@ export default function Home() {
             setSelected(attempt.selected_index);
             setStatus(attempt.is_correct ? 'correct' : 'wrong');
             setElapsed(Math.floor(attempt.ms_taken / 1000));
+
+            // Get user rank
+            if (attempt.is_correct) {
+              const { count: fasterCount } = await supabase
+                .from('attempts')
+                .select('*', { count: 'exact', head: true })
+                .eq('puzzle_id', data.id)
+                .eq('is_correct', true)
+                .lt('ms_taken', attempt.ms_taken);
+              setUserRank((fasterCount ?? 0) + 1);
+            }
             return;
           }
         }
@@ -143,10 +211,7 @@ export default function Home() {
         });
 
         if (error) {
-          if (error.code === '23505') {
-            // Duplicate - user already submitted (race condition guard)
-            return;
-          }
+          if (error.code === '23505') return;
           throw error;
         }
       } catch (e: any) {
@@ -159,29 +224,14 @@ export default function Home() {
     }
   }
 
-  async function signOut() {
-    const confirmed = await showConfirm('Sign out', 'Are you sure you want to sign out?', 'Sign out');
-    if (confirmed) {
-      await supabase.auth.signOut();
-    }
-  }
-
   const getPuzzleTypeColor = (type: string) => {
-    switch (type) {
-      case 'pattern': return '#f59e0b';
-      case 'logic': return '#8b5cf6';
-      case 'math': return '#10b981';
-      default: return colors.primary;
-    }
+    const found = puzzleCategories.find((c) => c.type === type);
+    return found?.color ?? colors.primary;
   };
 
   const getPuzzleTypeEmoji = (type: string) => {
-    switch (type) {
-      case 'pattern': return '🔍';
-      case 'logic': return '🧩';
-      case 'math': return '🔢';
-      default: return '🧠';
-    }
+    const found = puzzleCategories.find((c) => c.type === type);
+    return found?.emoji ?? '🧠';
   };
 
   if (loading) {
@@ -214,25 +264,9 @@ export default function Home() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.appTitle, { color: colors.text }]}>MindArena</Text>
-          <View style={[styles.dateBadge, { backgroundColor: `${colors.warning}20` }]}>
-            <Text style={[styles.dateBadgeText, { color: colors.warning }]}>{dayKey}</Text>
-          </View>
-        </View>
-        <View style={styles.headerRight}>
-          <Pressable
-            onPress={() => router.push('/leaderboard')}
-            style={[styles.iconBtn, { backgroundColor: colors.surfaceVariant }]}
-          >
-            <Text style={styles.iconBtnText}>🏆</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/profile')}
-            style={[styles.iconBtn, { backgroundColor: colors.surfaceVariant }]}
-          >
-            <Text style={styles.iconBtnText}>👤</Text>
-          </Pressable>
+        <Text style={[styles.appTitle, { color: colors.text }]}>MindArena</Text>
+        <View style={[styles.dateBadge, { backgroundColor: `${colors.warning}20` }]}>
+          <Text style={[styles.dateBadgeText, { color: colors.warning }]}>{dayKey}</Text>
         </View>
       </View>
 
@@ -241,6 +275,50 @@ export default function Home() {
         contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Welcome Banner */}
+        <Card style={styles.welcomeBanner} padding="lg">
+          <Text style={[styles.welcomeText, { color: colors.text }]}>Welcome back!</Text>
+          <View style={styles.welcomeStats}>
+            <View style={styles.welcomeStat}>
+              <Text style={[styles.welcomeStatValue, { color: '#f59e0b' }]}>
+                {userStreak > 0 ? `${userStreak}` : '0'}
+              </Text>
+              <Text style={[styles.welcomeStatLabel, { color: colors.textSecondary }]}>Day Streak</Text>
+            </View>
+            <View style={[styles.welcomeDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.welcomeStat}>
+              <Text style={[styles.welcomeStatValue, { color: colors.primary }]}>
+                {userPoints}
+              </Text>
+              <Text style={[styles.welcomeStatLabel, { color: colors.textSecondary }]}>Points</Text>
+            </View>
+          </View>
+        </Card>
+
+        {/* Puzzle Categories */}
+        <Text style={[styles.sectionLabel, { color: colors.text }]}>Puzzle Types</Text>
+        <FlatList
+          horizontal
+          data={puzzleCategories}
+          keyExtractor={(item) => item.type}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesRow}
+          renderItem={({ item }) => (
+            <View
+              style={[
+                styles.categoryChip,
+                {
+                  backgroundColor: `${item.color}15`,
+                  borderColor: puzzle.type === item.type ? item.color : 'transparent',
+                },
+              ]}
+            >
+              <Text style={styles.categoryEmoji}>{item.emoji}</Text>
+              <Text style={[styles.categoryLabel, { color: item.color }]}>{item.label}</Text>
+            </View>
+          )}
+        />
+
         {/* Type + Timer */}
         <View style={styles.metaRow}>
           <View style={[styles.typeBadge, { backgroundColor: `${getPuzzleTypeColor(puzzle.type)}15` }]}>
@@ -251,7 +329,7 @@ export default function Home() {
           </View>
           <View style={[styles.timerBadge, { backgroundColor: colors.surfaceVariant }]}>
             <Text style={[styles.timerText, { color: colors.textSecondary }]}>
-              ⏱ {elapsed}s
+              {elapsed}s
             </Text>
           </View>
         </View>
@@ -272,7 +350,6 @@ export default function Home() {
               let borderColor = colors.border;
               let bgColor = colors.surface;
               let textColor = colors.text;
-              let letterBg = 'transparent';
               let badge: string | null = null;
 
               if (active && !showAnswer) {
@@ -284,13 +361,13 @@ export default function Home() {
                 borderColor = colors.correct;
                 bgColor = `${colors.correct}10`;
                 textColor = colors.correct;
-                badge = '✓';
+                badge = '\u2713';
               }
               if (isWrong) {
                 borderColor = colors.wrong;
                 bgColor = `${colors.wrong}10`;
                 textColor = colors.wrong;
-                badge = '✗';
+                badge = '\u2717';
               }
 
               return (
@@ -374,39 +451,42 @@ export default function Home() {
           )}
         </Card>
 
+        {/* Quick Stats */}
+        <Card style={styles.quickStatsCard} padding="lg">
+          <View style={styles.quickStatsRow}>
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatValue, { color: colors.primary }]}>{solversCount}</Text>
+              <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Today's Solvers</Text>
+            </View>
+            <View style={[styles.quickStatDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.quickStatItem}>
+              <Text style={[styles.quickStatValue, { color: colors.secondary }]}>
+                {userRank ? `#${userRank}` : '-'}
+              </Text>
+              <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Your Rank</Text>
+            </View>
+          </View>
+        </Card>
+
+        {/* Daily Tip */}
+        <Card style={styles.tipCard} padding="lg">
+          <View style={styles.tipHeader}>
+            <Text style={styles.tipEmoji}>💡</Text>
+            <Text style={[styles.tipTitle, { color: colors.text }]}>Daily Tip</Text>
+          </View>
+          <Text style={[styles.tipText, { color: colors.textSecondary }]}>{dailyTip}</Text>
+        </Card>
+
         {/* Offline Notice */}
         {puzzle.id.startsWith('offline') && (
           <View style={[styles.offlineBar, { backgroundColor: colors.surfaceVariant }]}>
             <Text style={[styles.offlineText, { color: colors.textSecondary }]}>
-              📱 Offline mode - connect Supabase for leaderboards
+              Offline mode — connect Supabase for leaderboards
             </Text>
           </View>
         )}
 
-        {/* Quick Actions */}
-        <View style={styles.quickRow}>
-          <Pressable
-            style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={() => router.push('/leaderboard')}
-          >
-            <Text style={styles.quickIcon}>🏆</Text>
-            <Text style={[styles.quickLabel, { color: colors.text }]}>Leaderboard</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={() => router.push('/profile')}
-          >
-            <Text style={styles.quickIcon}>👤</Text>
-            <Text style={[styles.quickLabel, { color: colors.text }]}>Profile</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={signOut}
-          >
-            <Text style={styles.quickIcon}>🚪</Text>
-            <Text style={[styles.quickLabel, { color: colors.text }]}>Sign Out</Text>
-          </Pressable>
-        </View>
+        <View style={{ height: spacing.xl }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -426,7 +506,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderBottomWidth: 1,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   appTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
   dateBadge: {
     paddingHorizontal: spacing.sm,
@@ -434,19 +513,38 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
   },
   dateBadgeText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
-  headerRight: { flexDirection: 'row', gap: spacing.sm },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconBtnText: { fontSize: 18 },
 
   scroll: { flex: 1 },
   scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%', paddingBottom: spacing.xl },
 
+  // Welcome Banner
+  welcomeBanner: { marginBottom: spacing.md },
+  welcomeText: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.md },
+  welcomeStats: { flexDirection: 'row', alignItems: 'center' },
+  welcomeStat: { flex: 1, alignItems: 'center' },
+  welcomeStatValue: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  welcomeStatLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, marginTop: 2 },
+  welcomeDivider: { width: 1, height: 32 },
+
+  // Categories
+  sectionLabel: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+    marginBottom: spacing.sm,
+  },
+  categoriesRow: { gap: spacing.sm, paddingBottom: spacing.md },
+  categoryChip: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 2,
+    minWidth: 76,
+  },
+  categoryEmoji: { fontSize: 20, marginBottom: 2 },
+  categoryLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+
+  // Meta row
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -470,6 +568,7 @@ const styles = StyleSheet.create({
   },
   timerText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 
+  // Puzzle
   puzzleCard: { marginBottom: spacing.md },
   puzzleTitle: {
     fontSize: fontSize['2xl'],
@@ -521,6 +620,22 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.xs },
   resultMsg: { fontSize: fontSize.base, textAlign: 'center', marginBottom: spacing.sm },
 
+  // Quick Stats
+  quickStatsCard: { marginBottom: spacing.md },
+  quickStatsRow: { flexDirection: 'row', alignItems: 'center' },
+  quickStatItem: { flex: 1, alignItems: 'center' },
+  quickStatValue: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  quickStatLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, marginTop: 2 },
+  quickStatDivider: { width: 1, height: 32 },
+
+  // Daily Tip
+  tipCard: { marginBottom: spacing.md },
+  tipHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  tipEmoji: { fontSize: 20 },
+  tipTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
+  tipText: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.6 },
+
+  // Offline
   offlineBar: {
     padding: spacing.md,
     borderRadius: borderRadius.md,
@@ -528,15 +643,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   offlineText: { fontSize: fontSize.sm },
-
-  quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.xl },
-  quickAction: {
-    flex: 1,
-    alignItems: 'center',
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-  },
-  quickIcon: { fontSize: 24, marginBottom: spacing.xs },
-  quickLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 });
