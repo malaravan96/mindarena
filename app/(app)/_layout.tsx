@@ -4,10 +4,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BlurView } from 'expo-blur';
 import { Platform, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { upsertCurrentUserPushToken } from '@/lib/push';
 
 export default function AppLayout() {
   const { colors, colorScheme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const isIOS = Platform.OS === 'ios';
+  const bottomInset = Math.max(insets.bottom, isIOS ? 16 : 8);
 
   useEffect(() => {
     upsertCurrentUserPushToken().catch(() => null);
@@ -19,18 +23,22 @@ export default function AppLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           position: 'absolute',
-          backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.surface,
+          backgroundColor: isIOS ? 'transparent' : colors.surface,
           borderTopWidth: 0,
           elevation: 0,
           shadowOpacity: 0,
-          height: Platform.OS === 'ios' ? 85 : 65,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
-          paddingTop: 10,
+          height: 58 + bottomInset,
+          paddingBottom: Math.max(bottomInset - 4, 8),
+          paddingTop: 8,
+        },
+        tabBarItemStyle: {
+          paddingVertical: 2,
         },
         tabBarBackground: () =>
-          Platform.OS === 'ios' ? (
+          isIOS ? (
             <BlurView
               tint={colorScheme === 'dark' ? 'dark' : 'light'}
               intensity={90}
@@ -40,9 +48,9 @@ export default function AppLayout() {
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
           ),
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
-          marginTop: 2,
+          marginTop: 1,
         },
       }}
     >
@@ -83,16 +91,20 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="chat"
         options={{
-          title: 'Settings',
+          title: 'Chat',
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'settings' : 'settings-outline'} size={size + 2} color={color} />
+            <Ionicons
+              name={focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline'}
+              size={size + 2}
+              color={color}
+            />
           ),
         }}
       />
       <Tabs.Screen
-        name="messages"
+        name="chat-thread"
         options={{
           href: null,
         }}
