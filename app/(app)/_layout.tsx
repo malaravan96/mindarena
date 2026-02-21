@@ -2,27 +2,42 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
+import { BlurView } from 'expo-blur';
+import { Platform, StyleSheet, View } from 'react-native';
 
 export default function AppLayout() {
-  const { colors } = useTheme();
+  const { colors, colorScheme } = useTheme();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textTertiary,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
-          paddingBottom: 4,
-          paddingTop: 4,
-          height: 56,
+          position: 'absolute',
+          backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.surface,
+          borderTopWidth: 0,
+          elevation: 0,
+          shadowOpacity: 0,
+          height: Platform.OS === 'ios' ? 85 : 65,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          paddingTop: 10,
         },
+        tabBarBackground: () =>
+          Platform.OS === 'ios' ? (
+            <BlurView
+              tint={colorScheme === 'dark' ? 'dark' : 'light'}
+              intensity={90}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+          ),
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
+          marginTop: 2,
         },
       }}
     >
@@ -30,17 +45,17 @@ export default function AppLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={size + 2} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="leaderboard"
         options={{
-          title: 'Leaderboard',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="trophy" size={size} color={color} />
+          title: 'Rankings',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'trophy' : 'trophy-outline'} size={size + 2} color={color} />
           ),
         }}
       />
@@ -48,8 +63,8 @@ export default function AppLayout() {
         name="pvp"
         options={{
           title: 'Battle',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flash" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'flash' : 'flash-outline'} size={size + 2} color={color} />
           ),
         }}
       />
@@ -57,8 +72,8 @@ export default function AppLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={size + 2} color={color} />
           ),
         }}
       />
@@ -66,8 +81,8 @@ export default function AppLayout() {
         name="settings"
         options={{
           title: 'Settings',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'settings' : 'settings-outline'} size={size + 2} color={color} />
           ),
         }}
       />

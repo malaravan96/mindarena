@@ -7,9 +7,9 @@ import {
   ActivityIndicator,
   ScrollView,
   AppState,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
@@ -637,44 +637,47 @@ export default function PvpScreen() {
     .map((p) => ({ ...p, online: onlineIds.has(p.id) }))
     .sort((a, b) => (a.online === b.online ? 0 : a.online ? -1 : 1));
 
-  // ── RENDER ──────────────────────────────────────────────────────
+
+  const onlineCount = playerList.filter((p) => p.online).length;
+  const totalMatches = stats.wins + stats.losses + stats.draws;
+  const winRate = totalMatches > 0 ? Math.round((stats.wins / totalMatches) * 100) : 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.appTitle, { color: colors.text }]}>Battle Mode</Text>
-        <View style={[styles.headerBadge, { backgroundColor: `${colors.primary}20` }]}>
-          <Ionicons name="flash" size={16} color={colors.primary} />
-          <Text style={[styles.headerBadgeText, { color: colors.primary }]}>1v1</Text>
+      <View style={styles.backgroundLayer} pointerEvents="none">
+        <View style={[styles.bgOrbTop, { backgroundColor: `${colors.primary}18` }]} />
+        <View style={[styles.bgOrbBottom, { backgroundColor: `${colors.secondary}14` }]} />
+      </View>
+
+      <View style={styles.header}>
+        <View style={styles.headerTitleWrap}>
+          <Text style={[styles.appTitle, { color: colors.text }]}>Battle Arena</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Real-time 1v1 puzzle duels</Text>
+        </View>
+        <View style={[styles.headerBadge, { backgroundColor: `${colors.primary}18` }]}>
+          <Ionicons name="radio-outline" size={14} color={colors.primary} />
+          <Text style={[styles.headerBadgeText, { color: colors.primary }]}>Live</Text>
         </View>
       </View>
 
-      {/* ── Incoming Invite Banner ── */}
       {pendingInvite && phase === 'lobby' && (
-        <View style={[styles.inviteBanner, { backgroundColor: `${colors.primary}15`, borderBottomColor: colors.border }]}>
+        <View style={[styles.inviteBanner, { borderColor: `${colors.primary}35`, backgroundColor: `${colors.primary}10` }]}>
           <View style={styles.inviteBannerContent}>
-            <Ionicons name="flash" size={20} color={colors.primary} />
+            <View style={[styles.inviteIconWrap, { backgroundColor: `${colors.primary}18` }]}>
+              <Ionicons name="flash" size={18} color={colors.primary} />
+            </View>
             <View style={styles.inviteBannerText}>
-              <Text style={[styles.inviteBannerTitle, { color: colors.text }]}>
-                Battle Invite!
-              </Text>
+              <Text style={[styles.inviteBannerTitle, { color: colors.text }]}>Challenge incoming</Text>
               <Text style={[styles.inviteBannerFrom, { color: colors.textSecondary }]}>
-                {pendingInvite.fromName} wants to battle you
+                {pendingInvite.fromName} wants a quick battle
               </Text>
             </View>
           </View>
           <View style={styles.inviteBannerActions}>
-            <Pressable
-              onPress={acceptInvite}
-              style={[styles.inviteBtn, { backgroundColor: colors.correct }]}
-            >
+            <Pressable onPress={acceptInvite} style={[styles.inviteBtn, { backgroundColor: colors.correct }]}>
               <Text style={styles.inviteBtnText}>Accept</Text>
             </Pressable>
-            <Pressable
-              onPress={declineInvite}
-              style={[styles.inviteBtn, { backgroundColor: colors.wrong }]}
-            >
+            <Pressable onPress={declineInvite} style={[styles.inviteBtn, { backgroundColor: colors.wrong }]}>
               <Text style={styles.inviteBtnText}>Decline</Text>
             </Pressable>
           </View>
@@ -683,15 +686,38 @@ export default function PvpScreen() {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
+        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 760 : undefined }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── LOBBY ── */}
         {phase === 'lobby' && (
           <>
-            {/* Stats Card */}
+            <LinearGradient
+              colors={[colors.gradientStart, colors.gradientEnd]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.heroCard}
+            >
+              <View style={styles.heroGlow} />
+              <Text style={styles.heroTitle}>Queue Up</Text>
+              <Text style={styles.heroSubtitle}>Invite any online player to start an instant round.</Text>
+              <View style={styles.heroStatsRow}>
+                <View style={styles.heroStatPill}>
+                  <Text style={styles.heroStatValue}>{onlineCount}</Text>
+                  <Text style={styles.heroStatLabel}>Online</Text>
+                </View>
+                <View style={styles.heroStatPill}>
+                  <Text style={styles.heroStatValue}>{totalMatches}</Text>
+                  <Text style={styles.heroStatLabel}>Matches</Text>
+                </View>
+                <View style={styles.heroStatPill}>
+                  <Text style={styles.heroStatValue}>{winRate}%</Text>
+                  <Text style={styles.heroStatLabel}>Win rate</Text>
+                </View>
+              </View>
+            </LinearGradient>
+
             <Card style={styles.card} padding="lg">
-              <Text style={[styles.statsTitle, { color: colors.text }]}>Your Battle Stats</Text>
+              <Text style={[styles.statsTitle, { color: colors.text }]}>Record</Text>
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
                   <Text style={[styles.statValue, { color: colors.correct }]}>{stats.wins}</Text>
@@ -710,18 +736,19 @@ export default function PvpScreen() {
               </View>
             </Card>
 
-            {/* Player List */}
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>
-              Players ({playerList.filter((p) => p.online).length} online)
-            </Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Active Players</Text>
+              <Text style={[styles.onlineSummary, { color: colors.textSecondary }]}>{onlineCount} online</Text>
+            </View>
 
             {loadingPlayers ? (
               <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
             ) : playerList.length === 0 ? (
               <Card style={styles.card} padding="lg">
-                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                  No other players found. Invite your friends to join MindArena!
-                </Text>
+                <View style={{ alignItems: 'center' }}>
+                  <Ionicons name="people-outline" size={46} color={colors.textTertiary} style={{ marginBottom: spacing.md }} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No players detected yet. Share MindArena and build your battle lobby.</Text>
+                </View>
               </Card>
             ) : (
               playerList.map((player) => (
@@ -732,17 +759,16 @@ export default function PvpScreen() {
                   style={({ pressed }) => [
                     styles.playerRow,
                     {
+                      opacity: player.online ? 1 : 0.62,
+                      borderColor: player.online ? `${colors.primary}30` : colors.border,
                       backgroundColor: pressed ? `${colors.primary}08` : colors.surface,
-                      borderColor: colors.border,
-                      opacity: player.online ? 1 : 0.5,
                     },
                   ]}
                 >
-                  {/* Avatar */}
                   <View
                     style={[
                       styles.playerAvatar,
-                      { backgroundColor: player.online ? `${colors.primary}20` : colors.surfaceVariant },
+                      { backgroundColor: player.online ? `${colors.primary}16` : colors.surfaceVariant },
                     ]}
                   >
                     <Text
@@ -755,19 +781,25 @@ export default function PvpScreen() {
                     </Text>
                   </View>
 
-                  {/* Info */}
                   <View style={styles.playerInfo}>
                     <Text style={[styles.playerName, { color: colors.text }]}>
                       {player.display_name || player.username}
                     </Text>
-                    <Text style={[styles.playerMeta, { color: colors.textSecondary }]}>
-                      {player.total_points} pts
-                    </Text>
+                    <View style={styles.playerMetaRow}>
+                      <Ionicons name="star" size={12} color={colors.warning} />
+                      <Text style={[styles.playerMeta, { color: colors.textSecondary }]}>
+                        {player.total_points} points
+                      </Text>
+                    </View>
                   </View>
 
-                  {/* Status / Action */}
                   <View style={styles.playerAction}>
-                    <View style={styles.statusRow}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: player.online ? `${colors.correct}16` : `${colors.textTertiary}16` },
+                      ]}
+                    >
                       <View
                         style={[
                           styles.onlineDot,
@@ -777,14 +809,17 @@ export default function PvpScreen() {
                       <Text
                         style={[
                           styles.statusLabel,
-                          { color: player.online ? colors.correct : colors.textTertiary },
+                          { color: player.online ? colors.correct : colors.textSecondary },
                         ]}
                       >
                         {player.online ? 'Online' : 'Offline'}
                       </Text>
                     </View>
                     {player.online && (
-                      <Ionicons name="flash" size={18} color={colors.primary} />
+                      <View style={[styles.battleAction, { backgroundColor: `${colors.primary}16` }]}>
+                        <Ionicons name="flash" size={13} color={colors.primary} />
+                        <Text style={[styles.battleActionText, { color: colors.primary }]}>Invite</Text>
+                      </View>
                     )}
                   </View>
                 </Pressable>
@@ -792,152 +827,174 @@ export default function PvpScreen() {
             )}
 
             {!userId && (
-              <Text style={[styles.signInHint, { color: colors.textTertiary }]}>
-                Sign in to play against others
-              </Text>
+              <View style={[styles.signInHintWrap, { backgroundColor: `${colors.warning}16` }]}>
+                <Ionicons name="log-in-outline" size={18} color={colors.warning} />
+                <Text style={[styles.signInHint, { color: colors.warning }]}>Sign in to battle online opponents.</Text>
+              </View>
             )}
           </>
         )}
 
-        {/* ── INVITE SENT ── */}
         {phase === 'invite-sent' && (
-          <View style={styles.centeredPhase}>
-            <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: spacing.lg }} />
-            <Text style={[styles.phaseTitle, { color: colors.text }]}>Invite Sent!</Text>
-            <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>
-              Waiting for {invitedPlayer?.username ?? 'opponent'} to accept...
-            </Text>
-            <Button
-              title="Cancel"
-              onPress={cancelInvite}
-              variant="outline"
-              style={{ marginTop: spacing.xl }}
-            />
-          </View>
+          <Card style={styles.phaseCard} padding="lg">
+            <View style={styles.centeredPhase}>
+              <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: spacing.lg }} />
+              <Text style={[styles.phaseTitle, { color: colors.text }]}>Invite Sent</Text>
+              <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>Waiting for {invitedPlayer?.username ?? 'opponent'} to join...</Text>
+              <Button title="Cancel Invite" onPress={cancelInvite} variant="outline" style={{ marginTop: spacing.lg }} />
+            </View>
+          </Card>
         )}
 
-        {/* ── FOUND ── */}
         {phase === 'found' && (
-          <View style={styles.centeredPhase}>
-            <Text style={[styles.foundLabel, { color: colors.primary }]}>Match Starting!</Text>
-            <View style={styles.vsRow}>
-              <View style={[styles.playerCircle, { backgroundColor: `${colors.primary}20` }]}>
-                <Text style={[styles.playerInitials, { color: colors.primary }]}>
-                  {getInitials(username)}
-                </Text>
+          <Card style={styles.phaseCard} padding="lg">
+            <View style={styles.centeredPhase}>
+              <View style={[styles.foundBadge, { backgroundColor: `${colors.primary}16` }]}>
+                <Ionicons name="flash" size={24} color={colors.primary} />
               </View>
-              <Text style={[styles.vsText, { color: colors.textTertiary }]}>VS</Text>
-              <View style={[styles.playerCircle, { backgroundColor: `${colors.wrong}20` }]}>
-                <Text style={[styles.playerInitials, { color: colors.wrong }]}>
-                  {getInitials(opponentName)}
-                </Text>
+              <Text style={[styles.foundLabel, { color: colors.primary }]}>Match Found</Text>
+
+              <View style={styles.vsRow}>
+                <View style={styles.playerCircleWrap}>
+                  <View style={[styles.playerCircle, { backgroundColor: `${colors.primary}16`, borderColor: colors.primary }]}>
+                    <Text style={[styles.playerInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
+                  </View>
+                  <Text style={[styles.circleLabel, { color: colors.text }]}>You</Text>
+                </View>
+
+                <View style={[styles.vsBadge, { backgroundColor: colors.text }]}>
+                  <Text style={[styles.vsText, { color: colors.surface }]}>VS</Text>
+                </View>
+
+                <View style={styles.playerCircleWrap}>
+                  <View style={[styles.playerCircle, { backgroundColor: `${colors.wrong}16`, borderColor: colors.wrong }]}>
+                    <Text style={[styles.playerInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
+                  </View>
+                  <Text style={[styles.circleLabel, { color: colors.text }]}>{opponentName}</Text>
+                </View>
               </View>
             </View>
-            <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>Get ready...</Text>
-          </View>
+          </Card>
         )}
 
-        {/* ── COUNTDOWN ── */}
         {phase === 'countdown' && (
-          <View style={styles.centeredPhase}>
-            <Text
-              style={[
-                styles.countdownNum,
-                { color: countdownNum >= 2 ? colors.primary : colors.warning },
-              ]}
-            >
-              {countdownNum}
-            </Text>
-            <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>Get ready...</Text>
-          </View>
+          <Card style={styles.phaseCard} padding="lg">
+            <View style={styles.centeredPhase}>
+              <View style={[styles.countdownCircle, { borderColor: countdownNum >= 2 ? colors.primary : colors.warning }]}>
+                <Text style={[styles.countdownNum, { color: countdownNum >= 2 ? colors.primary : colors.warning }]}>
+                  {countdownNum}
+                </Text>
+              </View>
+              <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>Starting in...</Text>
+            </View>
+          </Card>
         )}
 
-        {/* ── PLAYING ── */}
         {phase === 'playing' && puzzle && (
-          <>
+          <View style={{ flex: 1 }}>
             <View style={styles.playingHeader}>
-              <View style={[styles.timerBadge, { backgroundColor: timeLeft <= 10 ? `${colors.wrong}20` : colors.surfaceVariant }]}>
+              <View style={[styles.timerBadge, { backgroundColor: timeLeft <= 10 ? `${colors.wrong}16` : colors.surfaceVariant }]}>
                 <Ionicons name="time-outline" size={16} color={timeLeft <= 10 ? colors.wrong : colors.textSecondary} />
                 <Text style={[styles.timerText, { color: timeLeft <= 10 ? colors.wrong : colors.textSecondary }]}>
                   {timeLeft}s
                 </Text>
               </View>
-              <View style={styles.opponentStatus}>
-                <View style={[styles.statusDot, { backgroundColor: opponentSubmitted ? colors.warning : colors.correct }]} />
-                <Text style={[styles.opponentStatusText, { color: colors.textSecondary }]}>
-                  {opponentSubmitted ? 'Opponent finished' : 'Opponent solving...'}
+              <View style={[styles.opponentStatusBadge, { backgroundColor: opponentSubmitted ? `${colors.warning}16` : `${colors.primary}14` }]}>
+                <View style={[styles.statusDot, { backgroundColor: opponentSubmitted ? colors.warning : colors.primary }]} />
+                <Text style={[styles.opponentStatusText, { color: opponentSubmitted ? colors.warning : colors.primary }]}>
+                  {opponentSubmitted ? 'Opponent finished' : 'Opponent solving'}
                 </Text>
               </View>
             </View>
 
             <Card style={styles.card} padding="lg">
-              <Text style={[styles.puzzleTitle, { color: colors.text }]}>{puzzle.title}</Text>
+              <Text style={[styles.puzzleTitle, { color: colors.text }]}>Solve Fast</Text>
               <Text style={[styles.puzzlePrompt, { color: colors.text }]}>{puzzle.prompt}</Text>
 
               <View style={styles.optionsWrap}>
                 {puzzle.options.map((opt, i) => {
-                  const active = selected === i;
+                  const isSelected = selected === i;
                   return (
                     <Pressable
                       key={i}
                       onPress={() => setSelected(i)}
-                      style={[
+                      style={({ pressed }) => [
                         styles.option,
                         {
-                          borderColor: active ? colors.primary : colors.border,
-                          backgroundColor: active ? `${colors.primary}08` : colors.surface,
+                          borderColor: isSelected ? colors.primary : colors.border,
+                          backgroundColor: isSelected ? `${colors.primary}10` : colors.surface,
+                          transform: [{ scale: pressed ? 0.985 : 1 }],
                         },
                       ]}
                     >
                       <View style={styles.optionContent}>
-                        <View style={[styles.optionLetter, { borderColor: active ? colors.primary : colors.border }]}>
-                          <Text style={[styles.optionLetterText, { color: active ? colors.primary : colors.text }]}>
-                            {String.fromCharCode(65 + i)}
+                        <View
+                          style={[
+                            styles.optionLetter,
+                            {
+                              borderColor: isSelected ? colors.primary : colors.border,
+                              backgroundColor: isSelected ? colors.primary : 'transparent',
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.optionLetterText, { color: isSelected ? '#fff' : colors.textSecondary }]}>
+                            {['A', 'B', 'C', 'D'][i]}
                           </Text>
                         </View>
-                        <Text style={[styles.optionText, { color: active ? colors.primary : colors.text }]}>
+                        <Text style={[styles.optionText, { color: colors.text, fontWeight: isSelected ? '700' : '500' }]}>
                           {opt}
                         </Text>
                       </View>
+                      {isSelected && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
                     </Pressable>
                   );
                 })}
               </View>
-
-              <Button
-                title="Submit Answer"
-                onPress={() => handleSubmit(selected ?? -1)}
-                disabled={selected === null}
-                fullWidth
-                size="lg"
-                style={{ marginTop: spacing.lg }}
-              />
             </Card>
-          </>
-        )}
 
-        {/* ── WAITING ── */}
-        {phase === 'waiting' && (
-          <View style={styles.centeredPhase}>
-            <Ionicons name="checkmark-circle" size={48} color={colors.correct} />
-            <Text style={[styles.phaseTitle, { color: colors.text, marginTop: spacing.md }]}>
-              Answer Locked In!
-            </Text>
-            <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>
-              Waiting for opponent to finish...
-            </Text>
-            <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.lg }} />
+            <Button
+              title="Submit Answer"
+              onPress={() => selected !== null && handleSubmit(selected)}
+              disabled={selected === null}
+              variant="gradient"
+              size="lg"
+              fullWidth
+              style={{ marginTop: spacing.md }}
+            />
           </View>
         )}
 
-        {/* ── RESULT ── */}
+        {phase === 'waiting' && (
+          <Card style={styles.phaseCard} padding="lg">
+            <View style={styles.centeredPhase}>
+              <View style={[styles.waitingIconWrap, { backgroundColor: `${colors.primary}14` }]}>
+                <Ionicons name="checkmark" size={42} color={colors.primary} />
+              </View>
+              <Text style={[styles.phaseTitle, { color: colors.text, marginTop: spacing.lg }]}>Answer Locked</Text>
+              <Text style={[styles.phaseSubtitle, { color: colors.textSecondary }]}>Waiting for {opponentName}...</Text>
+              <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: spacing.lg }} />
+            </View>
+          </Card>
+        )}
+
         {phase === 'result' && (
           <>
             <Card style={styles.card} padding="lg">
               <View style={styles.resultBanner}>
-                <Text style={styles.resultEmoji}>
-                  {matchResult === 'win' ? '🏆' : matchResult === 'loss' ? '😔' : '🤝'}
-                </Text>
+                {matchResult === 'win' ? (
+                  <View style={[styles.resultIconWrap, { backgroundColor: `${colors.correct}15` }]}>
+                    <Ionicons name="trophy" size={44} color={colors.correct} />
+                  </View>
+                ) : matchResult === 'loss' ? (
+                  <View style={[styles.resultIconWrap, { backgroundColor: `${colors.wrong}15` }]}>
+                    <Ionicons name="sad" size={44} color={colors.wrong} />
+                  </View>
+                ) : (
+                  <View style={[styles.resultIconWrap, { backgroundColor: `${colors.warning}15` }]}>
+                    <Ionicons name="hand-right" size={44} color={colors.warning} />
+                  </View>
+                )}
+
                 <Text
                   style={[
                     styles.resultTitle,
@@ -951,7 +1008,7 @@ export default function PvpScreen() {
                     },
                   ]}
                 >
-                  {matchResult === 'win' ? 'You Win!' : matchResult === 'loss' ? 'You Lose' : 'Draw!'}
+                  {matchResult === 'win' ? 'You Win' : matchResult === 'loss' ? 'You Lose' : 'Draw'}
                 </Text>
               </View>
 
@@ -959,42 +1016,34 @@ export default function PvpScreen() {
                 <View style={styles.comparisonWrap}>
                   <View style={styles.comparisonCol}>
                     <Text style={[styles.compLabel, { color: colors.textSecondary }]}>You</Text>
-                    <View style={[styles.compCircle, { backgroundColor: `${colors.primary}20` }]}>
-                      <Text style={[styles.compInitials, { color: colors.primary }]}>
-                        {getInitials(username)}
-                      </Text>
+                    <View style={[styles.compCircle, { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}>
+                      <Text style={[styles.compInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
                     </View>
-                    <View style={[styles.compBadge, { backgroundColor: myReveal.isCorrect ? `${colors.correct}20` : `${colors.wrong}20` }]}>
+                    <View style={[styles.compBadge, { backgroundColor: myReveal.isCorrect ? `${colors.correct}14` : `${colors.wrong}14` }]}>
                       <Text style={{ color: myReveal.isCorrect ? colors.correct : colors.wrong, fontSize: fontSize.xs, fontWeight: fontWeight.bold }}>
                         {myReveal.isCorrect ? 'Correct' : 'Wrong'}
                       </Text>
                     </View>
-                    <Text style={[styles.compTime, { color: colors.textSecondary }]}>
-                      {formatTime(myReveal.msTaken)}
-                    </Text>
+                    <Text style={[styles.compTime, { color: colors.textSecondary }]}>{formatTime(myReveal.msTaken)}</Text>
                   </View>
 
-                  <Text style={[styles.vsTextSmall, { color: colors.textTertiary }]}>VS</Text>
+                  <View style={[styles.vsBadgeSmall, { backgroundColor: colors.text }]}>
+                    <Text style={[styles.vsTextSmall, { color: colors.surface }]}>VS</Text>
+                  </View>
 
                   <View style={styles.comparisonCol}>
-                    <Text style={[styles.compLabel, { color: colors.textSecondary }]}>
-                      {opponentName}
-                    </Text>
-                    <View style={[styles.compCircle, { backgroundColor: `${colors.wrong}20` }]}>
-                      <Text style={[styles.compInitials, { color: colors.wrong }]}>
-                        {getInitials(opponentName)}
-                      </Text>
+                    <Text style={[styles.compLabel, { color: colors.textSecondary }]}>{opponentName}</Text>
+                    <View style={[styles.compCircle, { backgroundColor: `${colors.wrong}15`, borderColor: colors.wrong }]}>
+                      <Text style={[styles.compInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
                     </View>
                     {oppReveal ? (
                       <>
-                        <View style={[styles.compBadge, { backgroundColor: oppReveal.isCorrect ? `${colors.correct}20` : `${colors.wrong}20` }]}>
+                        <View style={[styles.compBadge, { backgroundColor: oppReveal.isCorrect ? `${colors.correct}14` : `${colors.wrong}14` }]}>
                           <Text style={{ color: oppReveal.isCorrect ? colors.correct : colors.wrong, fontSize: fontSize.xs, fontWeight: fontWeight.bold }}>
                             {oppReveal.isCorrect ? 'Correct' : 'Wrong'}
                           </Text>
                         </View>
-                        <Text style={[styles.compTime, { color: colors.textSecondary }]}>
-                          {formatTime(oppReveal.msTaken)}
-                        </Text>
+                        <Text style={[styles.compTime, { color: colors.textSecondary }]}>{formatTime(oppReveal.msTaken)}</Text>
                       </>
                     ) : (
                       <Text style={[styles.compTime, { color: colors.textTertiary }]}>Disconnected</Text>
@@ -1021,52 +1070,67 @@ export default function PvpScreen() {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
+  backgroundLayer: { ...StyleSheet.absoluteFillObject },
+  bgOrbTop: {
+    position: 'absolute',
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    top: -90,
+    right: -70,
   },
-  appTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
+  bgOrbBottom: {
+    position: 'absolute',
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    bottom: 120,
+    left: -90,
+  },
+
+  header: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  headerTitleWrap: { flex: 1 },
+  appTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  headerSubtitle: { fontSize: fontSize.sm, marginTop: 2 },
   headerBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    borderRadius: borderRadius.full,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs / 2,
-    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.xs,
   },
   headerBadgeText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
 
-  scroll: { flex: 1 },
-  scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%', paddingBottom: spacing.xl },
-
-  card: { marginBottom: spacing.md },
-
-  // Invite banner
   inviteBanner: {
-    padding: spacing.md,
-    borderBottomWidth: 1,
-  },
-  inviteBannerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+  },
+  inviteBannerContent: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  inviteIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inviteBannerText: { flex: 1 },
   inviteBannerTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
-  inviteBannerFrom: { fontSize: fontSize.sm },
-  inviteBannerActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
+  inviteBannerFrom: { fontSize: fontSize.sm, marginTop: 2 },
+  inviteBannerActions: { flexDirection: 'row', gap: spacing.sm },
   inviteBtn: {
     flex: 1,
     paddingVertical: spacing.sm,
@@ -1075,31 +1139,71 @@ const styles = StyleSheet.create({
   },
   inviteBtnText: { color: '#fff', fontSize: fontSize.sm, fontWeight: fontWeight.bold },
 
-  // Stats
-  statsTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, marginBottom: spacing.md, textAlign: 'center' },
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+    alignSelf: 'center',
+    width: '100%',
+  },
+
+  heroCard: {
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  heroGlow: {
+    position: 'absolute',
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    top: -65,
+    right: -50,
+    backgroundColor: 'rgba(255,255,255,0.17)',
+  },
+  heroTitle: { color: '#fff', fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: fontSize.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  heroStatsRow: { flexDirection: 'row', gap: spacing.sm },
+  heroStatPill: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.17)',
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  heroStatValue: { color: '#fff', fontSize: fontSize.lg, fontWeight: fontWeight.black },
+  heroStatLabel: { color: 'rgba(255,255,255,0.85)', fontSize: fontSize.xs },
+
+  card: { marginBottom: spacing.md, borderRadius: borderRadius.xl },
+  statsTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.md, textAlign: 'center' },
   statsRow: { flexDirection: 'row', alignItems: 'center' },
   statItem: { flex: 1, alignItems: 'center' },
   statValue: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
   statLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, marginTop: 2 },
-  statDivider: { width: 1, height: 32 },
+  statDivider: { width: 1, height: 34 },
 
-  // Section label
-  sectionLabel: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: spacing.sm,
-    marginTop: spacing.xs,
   },
-
+  sectionLabel: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
+  onlineSummary: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
   emptyText: { fontSize: fontSize.sm, textAlign: 'center' },
 
-  // Player list
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
     borderWidth: 1,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     marginBottom: spacing.sm,
   },
   playerAvatar: {
@@ -1112,41 +1216,86 @@ const styles = StyleSheet.create({
   playerAvatarText: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
   playerInfo: { flex: 1, marginLeft: spacing.md },
   playerName: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
-  playerMeta: { fontSize: fontSize.xs, marginTop: 2 },
+  playerMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 4 },
+  playerMeta: { fontSize: fontSize.xs },
   playerAction: { alignItems: 'flex-end', gap: spacing.xs },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
   onlineDot: { width: 8, height: 8, borderRadius: 4 },
   statusLabel: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
+  battleAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.full,
+  },
+  battleActionText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
 
-  signInHint: { fontSize: fontSize.sm, textAlign: 'center', marginTop: spacing.md },
+  signInHintWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.sm,
+  },
+  signInHint: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
 
-  // Centered phases
-  centeredPhase: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl * 2 },
+  phaseCard: { marginBottom: spacing.md, borderRadius: borderRadius.xl },
+  centeredPhase: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xxl + spacing.md },
   phaseTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, textAlign: 'center' },
   phaseSubtitle: { fontSize: fontSize.base, textAlign: 'center', marginTop: spacing.sm },
 
-  // Found
-  foundLabel: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.xl },
+  foundBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  foundLabel: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.lg },
   vsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  playerCircleWrap: { alignItems: 'center', gap: spacing.sm },
   playerCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
   },
-  playerInitials: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
-  vsText: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  playerInitials: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black },
+  circleLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  vsBadge: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  vsText: { fontSize: fontSize.lg, fontWeight: fontWeight.black },
 
-  // Countdown
-  countdownNum: { fontSize: fontSize['5xl'] * 1.5, fontWeight: fontWeight.black },
+  countdownCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  countdownNum: { fontSize: fontSize['5xl'] * 1.3, fontWeight: fontWeight.black },
 
-  // Playing
   playingHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.md,
+    gap: spacing.sm,
   },
   timerBadge: {
     flexDirection: 'row',
@@ -1157,17 +1306,28 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
   },
   timerText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
-  opponentStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  opponentStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+  },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-  opponentStatusText: { fontSize: fontSize.sm },
+  opponentStatusText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 
-  // Puzzle
   puzzleTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.sm },
-  puzzlePrompt: { fontSize: fontSize.lg, fontWeight: fontWeight.medium, lineHeight: fontSize.lg * 1.6, marginBottom: spacing.lg },
+  puzzlePrompt: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.medium,
+    lineHeight: fontSize.lg * 1.5,
+    marginBottom: spacing.lg,
+  },
   optionsWrap: { gap: spacing.sm },
   option: {
-    borderWidth: 2,
-    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderRadius: borderRadius.lg,
     padding: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1178,27 +1338,42 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: borderRadius.full,
-    borderWidth: 2,
+    borderWidth: 1.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
   optionLetterText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
   optionText: { fontSize: fontSize.base, flex: 1 },
 
-  // Result
+  waitingIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   resultBanner: { alignItems: 'center', marginBottom: spacing.lg },
-  resultEmoji: { fontSize: 64, marginBottom: spacing.sm },
+  resultIconWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
   resultTitle: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black },
 
   comparisonWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   comparisonCol: { flex: 1, alignItems: 'center', gap: spacing.sm },
   compLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
   compCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
   },
   compInitials: { fontSize: fontSize.lg, fontWeight: fontWeight.black },
   compBadge: {
@@ -1207,5 +1382,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
   },
   compTime: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
-  vsTextSmall: { fontSize: fontSize.base, fontWeight: fontWeight.bold, marginHorizontal: spacing.md },
+  vsBadgeSmall: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  vsTextSmall: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
 });

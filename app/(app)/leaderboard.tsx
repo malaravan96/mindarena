@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { todayKey } from '@/lib/date';
 import { supabase } from '@/lib/supabase';
 import { Card } from '@/components/Card';
@@ -26,10 +28,23 @@ type Row = {
   profiles: { username: string | null; display_name: string | null } | null;
 };
 
+type Attempt = {
+  user_id: string;
+  ms_taken: number;
+  created_at: string;
+};
+
+const filterLabels: { key: TimeFilter; label: string; hint: string }[] = [
+  { key: 'today', label: 'Today', hint: 'Daily sprint' },
+  { key: 'week', label: 'Week', hint: 'Last 7 days' },
+  { key: 'all', label: 'All Time', hint: 'Hall of fame' },
+];
+
 export default function Leaderboard() {
   const router = useRouter();
   const { colors } = useTheme();
   const dayKey = useMemo(() => todayKey(), []);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
@@ -38,6 +53,10 @@ export default function Leaderboard() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
   const [userRankInfo, setUserRankInfo] = useState<{ rank: number; time: number } | null>(null);
 
+  const activeFilter = filterLabels.find((f) => f.key === timeFilter) ?? filterLabels[0];
+  const topThree = rows.slice(0, 3);
+  const others = rows.slice(3);
+
   useEffect(() => {
     getCurrentUser();
   }, []);
@@ -45,6 +64,10 @@ export default function Leaderboard() {
   useEffect(() => {
     loadLeaderboard();
   }, [dayKey, timeFilter]);
+
+  useEffect(() => {
+    computeUserRank(rows);
+  }, [rows, currentUserId]);
 
   async function getCurrentUser() {
     const { data } = await supabase.auth.getUser();
@@ -64,6 +87,7 @@ export default function Leaderboard() {
     } catch (e: any) {
       console.error('Leaderboard error:', e?.message);
       setRows([]);
+      setPuzzleId(timeFilter === 'today' ? null : timeFilter);
     } finally {
       setLoading(false);
     }
@@ -78,11 +102,13 @@ export default function Leaderboard() {
       .maybeSingle<{ id: string }>();
 
     if (pErr) throw pErr;
+
     if (!puzzle) {
       setPuzzleId(null);
       setRows([]);
       return;
     }
+
     setPuzzleId(puzzle.id);
 
     const { data, error } = await supabase
@@ -94,32 +120,26 @@ export default function Leaderboard() {
       .limit(100);
 
     if (error) throw error;
-    const normalized = await attachProfiles(data ?? []);
-    setRows(normalized);
-    computeUserRank(normalized);
+
+    setRows(await attachProfiles((data ?? []) as Attempt[]));
   }
 
   async function loadWeekLeaderboard() {
     setPuzzleId('week');
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekAgoStr = weekAgo.toISOString();
 
     const { data, error } = await supabase
       .from('attempts')
       .select('user_id, ms_taken, created_at')
       .eq('is_correct', true)
-      .gte('created_at', weekAgoStr)
+      .gte('created_at', weekAgo.toISOString())
       .order('ms_taken', { ascending: true })
-      .limit(100);
+      .limit(140);
 
     if (error) throw error;
 
-    // Deduplicate: keep best time per user
-    const bestByUser = deduplicateBest(data ?? []);
-    const normalized = await attachProfiles(bestByUser);
-    setRows(normalized);
-    computeUserRank(normalized);
+    setRows(await attachProfiles(deduplicateBest((data ?? []) as Attempt[])));
   }
 
   async function loadAllTimeLeaderboard() {
@@ -130,29 +150,28 @@ export default function Leaderboard() {
       .select('user_id, ms_taken, created_at')
       .eq('is_correct', true)
       .order('ms_taken', { ascending: true })
-      .limit(200);
+      .limit(220);
 
     if (error) throw error;
 
-    const bestByUser = deduplicateBest(data ?? []);
-    const normalized = await attachProfiles(bestByUser);
-    setRows(normalized);
-    computeUserRank(normalized);
+    setRows(await attachProfiles(deduplicateBest((data ?? []) as Attempt[])));
   }
 
-  function deduplicateBest(attempts: any[]): any[] {
-    const best: Record<string, any> = {};
+  function deduplicateBest(attempts: Attempt[]): Attempt[] {
+    const best: Record<string, Attempt> = {};
+
     for (const a of attempts) {
       if (!best[a.user_id] || a.ms_taken < best[a.user_id].ms_taken) {
         best[a.user_id] = a;
       }
     }
+
     return Object.values(best).sort((a, b) => a.ms_taken - b.ms_taken);
   }
 
-  async function attachProfiles(attempts: any[]): Promise<Row[]> {
-    const userIds = [...new Set(attempts.map((a: any) => a.user_id))];
-    let profilesMap: Record<string, { username: string | null; display_name: string | null }> = {};
+  async function attachProfiles(attempts: Attempt[]): Promise<Row[]> {
+    const userIds = [...new Set(attempts.map((a) => a.user_id))];
+    const profilesMap: Record<string, { username: string | null; display_name: string | null }> = {};
 
     if (userIds.length > 0) {
       const { data: profilesData } = await supabase
@@ -165,7 +184,7 @@ export default function Leaderboard() {
       }
     }
 
-    return attempts.map((a: any) => ({
+    return attempts.map((a) => ({
       ...a,
       profiles: profilesMap[a.user_id] ?? null,
     }));
@@ -176,12 +195,15 @@ export default function Leaderboard() {
       setUserRankInfo(null);
       return;
     }
+
     const idx = data.findIndex((r) => r.user_id === currentUserId);
+
     if (idx >= 0) {
       setUserRankInfo({ rank: idx + 1, time: data[idx].ms_taken });
-    } else {
-      setUserRankInfo(null);
+      return;
     }
+
+    setUserRankInfo(null);
   }
 
   async function onRefresh() {
@@ -190,200 +212,234 @@ export default function Leaderboard() {
     setRefreshing(false);
   }
 
-  const getRankDisplay = (rank: number) => {
-    switch (rank) {
-      case 1: return { emoji: '🥇', color: '#f59e0b' };
-      case 2: return { emoji: '🥈', color: '#94a3b8' };
-      case 3: return { emoji: '🥉', color: '#cd7f32' };
-      default: return { emoji: null, color: colors.textSecondary };
-    }
-  };
+  function getDisplayName(row: Row) {
+    return row.profiles?.display_name || row.profiles?.username || `User ${row.user_id.slice(0, 6)}`;
+  }
 
-  const filterLabels: { key: TimeFilter; label: string }[] = [
-    { key: 'today', label: 'Today' },
-    { key: 'week', label: 'This Week' },
-    { key: 'all', label: 'All Time' },
-  ];
+  function getRankIcon(rank: number): React.ComponentProps<typeof Ionicons>['name'] {
+    if (rank === 1) return 'trophy';
+    if (rank === 2) return 'medal';
+    if (rank === 3) return 'ribbon';
+    return 'ellipse';
+  }
+
+  function getRankColor(rank: number) {
+    if (rank === 1) return '#f59e0b';
+    if (rank === 2) return '#94a3b8';
+    if (rank === 3) return '#f97316';
+    return colors.textTertiary;
+  }
+
+  const fastest = rows[0] ? `${(rows[0].ms_taken / 1000).toFixed(2)}s` : '-';
+  const average = rows.length
+    ? `${(rows.reduce((sum, item) => sum + item.ms_taken, 0) / rows.length / 1000).toFixed(2)}s`
+    : '-';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Leaderboard</Text>
+      <View style={styles.backgroundLayer} pointerEvents="none">
+        <View style={[styles.bgOrbTop, { backgroundColor: `${colors.primary}18` }]} />
+        <View style={[styles.bgOrbBottom, { backgroundColor: `${colors.secondary}14` }]} />
       </View>
 
-      {/* Filter Tabs */}
-      <View style={[styles.filterRow, { backgroundColor: colors.surface }]}>
-        {filterLabels.map((f) => (
-          <Pressable
-            key={f.key}
-            style={[
-              styles.filterTab,
-              {
-                backgroundColor: timeFilter === f.key ? colors.primary : 'transparent',
-                borderColor: timeFilter === f.key ? colors.primary : colors.border,
-              },
-            ]}
-            onPress={() => setTimeFilter(f.key)}
-          >
-            <Text
+      <View style={styles.header}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Leaderboard</Text>
+        <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Rankings update in real time</Text>
+      </View>
+
+      <View style={styles.filterRow}>
+        {filterLabels.map((f) => {
+          const active = timeFilter === f.key;
+          return (
+            <Pressable
+              key={f.key}
+              onPress={() => setTimeFilter(f.key)}
               style={[
-                styles.filterTabText,
-                { color: timeFilter === f.key ? '#fff' : colors.textSecondary },
+                styles.filterTab,
+                {
+                  borderColor: active ? `${colors.primary}40` : colors.border,
+                  backgroundColor: active ? `${colors.primary}15` : colors.surface,
+                },
               ]}
             >
-              {f.label}
-            </Text>
-          </Pressable>
-        ))}
+              <Text style={[styles.filterLabel, { color: active ? colors.primary : colors.text }]}>{f.label}</Text>
+              <Text style={[styles.filterHint, { color: active ? colors.primary : colors.textSecondary }]}>
+                {f.hint}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
       {loading ? (
         <View style={styles.centerWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-            Loading leaderboard...
-          </Text>
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading leaderboard...</Text>
         </View>
       ) : (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
+          contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 760 : undefined }]}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         >
-          {/* User Rank Card */}
+          <LinearGradient
+            colors={[colors.gradientStart, colors.gradientEnd]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroCard}
+          >
+            <View style={styles.heroGlow} />
+            <View style={styles.heroRow}>
+              <View>
+                <Text style={styles.heroEyebrow}>{activeFilter.label}</Text>
+                <Text style={styles.heroTitle}>Fastest Minds</Text>
+              </View>
+              <View style={styles.heroTag}>
+                <Ionicons name="sparkles-outline" size={14} color="#fff" />
+                <Text style={styles.heroTagText}>{rows.length} ranked</Text>
+              </View>
+            </View>
+            <Text style={styles.heroSubtitle}>Compete for speed, precision, and consistency.</Text>
+            <View style={styles.heroStatsRow}>
+              <View style={styles.heroStatPill}>
+                <Text style={styles.heroStatValue}>{fastest}</Text>
+                <Text style={styles.heroStatLabel}>Best time</Text>
+              </View>
+              <View style={styles.heroStatPill}>
+                <Text style={styles.heroStatValue}>{average}</Text>
+                <Text style={styles.heroStatLabel}>Average</Text>
+              </View>
+            </View>
+          </LinearGradient>
+
           {userRankInfo && (
-            <Card style={styles.userRankCard} padding="lg">
-              <Text style={[styles.userRankLabel, { color: colors.textSecondary }]}>Your Position</Text>
-              <View style={styles.userRankRow}>
-                <Text style={[styles.userRankValue, { color: colors.primary }]}>#{userRankInfo.rank}</Text>
-                <View style={[styles.userRankDivider, { backgroundColor: colors.border }]} />
-                <Text style={[styles.userRankTime, { color: colors.success }]}>
-                  {(userRankInfo.time / 1000).toFixed(2)}s
-                </Text>
+            <Card style={styles.myRankCard} padding="md">
+              <View style={styles.myRankRow}>
+                <View>
+                  <Text style={[styles.myRankLabel, { color: colors.textSecondary }]}>Your current position</Text>
+                  <Text style={[styles.myRankValue, { color: colors.text }]}>#{userRankInfo.rank}</Text>
+                </View>
+                <View style={[styles.myRankTimePill, { backgroundColor: `${colors.primary}15` }]}>
+                  <Ionicons name="time-outline" size={14} color={colors.primary} />
+                  <Text style={[styles.myRankTime, { color: colors.primary }]}>
+                    {(userRankInfo.time / 1000).toFixed(2)}s
+                  </Text>
+                </View>
               </View>
             </Card>
           )}
 
           {!puzzleId ? (
             <Card style={styles.emptyCard}>
-              <Text style={styles.emptyEmoji}>🎯</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No Puzzle Today</Text>
+              <View style={[styles.emptyIcon, { backgroundColor: `${colors.warning}18` }]}>
+                <Ionicons name="calendar-outline" size={28} color={colors.warning} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No puzzle available yet</Text>
               <Text style={[styles.emptyMsg, { color: colors.textSecondary }]}>
-                Check back soon for today's puzzle!
+                Come back later today when the next challenge goes live.
               </Text>
             </Card>
           ) : rows.length === 0 ? (
             <Card style={styles.emptyCard}>
-              <Text style={styles.emptyEmoji}>🏆</Text>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>Be the First!</Text>
-              <Text style={[styles.emptyMsg, { color: colors.textSecondary }]}>
-                No one has solved {timeFilter === 'today' ? "today's puzzle" : 'any puzzles'} yet. Claim the top spot!
-              </Text>
+              <View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}18` }]}>
+                <Ionicons name="flag-outline" size={28} color={colors.primary} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No scores yet</Text>
+              <Text style={[styles.emptyMsg, { color: colors.textSecondary }]}>Be the first to set the benchmark.</Text>
+              <Button title="Solve Now" onPress={() => router.push('/')} variant="gradient" fullWidth style={{ marginTop: spacing.md }} />
             </Card>
           ) : (
             <>
-              {/* Stats */}
-              <Card style={styles.statsCard}>
-                <View style={styles.statsRow}>
-                  <View style={styles.statItem}>
-                    <Text style={[styles.statVal, { color: colors.primary }]}>{rows.length}</Text>
-                    <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Solvers</Text>
-                  </View>
-                  <View style={[styles.statDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.statItem}>
-                    <Text style={[styles.statVal, { color: colors.success }]}>
-                      {(rows[0]?.ms_taken / 1000).toFixed(1)}s
-                    </Text>
-                    <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Fastest</Text>
-                  </View>
-                  <View style={[styles.statDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.statItem}>
-                    <Text style={[styles.statVal, { color: colors.secondary }]}>
-                      {(rows.reduce((s, r) => s + r.ms_taken, 0) / rows.length / 1000).toFixed(1)}s
-                    </Text>
-                    <Text style={[styles.statLbl, { color: colors.textSecondary }]}>Average</Text>
-                  </View>
-                </View>
+              <View style={styles.kpiGrid}>
+                <Card style={styles.kpiCard} padding="md">
+                  <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Participants</Text>
+                  <Text style={[styles.kpiValue, { color: colors.text }]}>{rows.length}</Text>
+                </Card>
+                <Card style={styles.kpiCard} padding="md">
+                  <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Fastest</Text>
+                  <Text style={[styles.kpiValue, { color: colors.text }]}>{fastest}</Text>
+                </Card>
+                <Card style={styles.kpiCard} padding="md">
+                  <Text style={[styles.kpiLabel, { color: colors.textSecondary }]}>Average</Text>
+                  <Text style={[styles.kpiValue, { color: colors.text }]}>{average}</Text>
+                </Card>
+              </View>
+
+              <Card style={styles.podiumCard} padding="lg">
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Top Performers</Text>
+                {topThree.map((row, idx) => {
+                  const rank = idx + 1;
+                  const isMe = row.user_id === currentUserId;
+                  return (
+                    <View
+                      key={`top-${row.user_id}-${rank}`}
+                      style={[
+                        styles.podiumRow,
+                        {
+                          borderColor: rank === 1 ? `${getRankColor(rank)}60` : colors.border,
+                          backgroundColor: rank === 1 ? `${getRankColor(rank)}14` : colors.surface,
+                        },
+                      ]}
+                    >
+                      <View style={[styles.rankIconWrap, { backgroundColor: `${getRankColor(rank)}18` }]}>
+                        <Ionicons name={getRankIcon(rank)} size={16} color={getRankColor(rank)} />
+                      </View>
+                      <View style={styles.nameWrap}>
+                        <Text style={[styles.rowName, { color: colors.text }]}>
+                          {getDisplayName(row)}{isMe ? ' (You)' : ''}
+                        </Text>
+                        <Text style={[styles.rowSub, { color: colors.textSecondary }]}>Rank #{rank}</Text>
+                      </View>
+                      <Text style={[styles.rowTime, { color: getRankColor(rank) }]}>{(row.ms_taken / 1000).toFixed(2)}s</Text>
+                    </View>
+                  );
+                })}
               </Card>
 
-              {/* Rows */}
-              <Card style={styles.boardCard}>
-                <Text style={[styles.boardTitle, { color: colors.text }]}>Top Performers</Text>
-
+              <Card style={styles.boardCard} padding="lg">
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Full Ranking</Text>
                 {rows.map((row, idx) => {
                   const rank = idx + 1;
-                  const name =
-                    row.profiles?.display_name ||
-                    row.profiles?.username ||
-                    `User ${row.user_id.slice(0, 6)}`;
-                  const time = (row.ms_taken / 1000).toFixed(2);
                   const isMe = row.user_id === currentUserId;
-                  const rd = getRankDisplay(rank);
+                  const emphasize = rank <= 3;
 
                   return (
                     <View
                       key={`${row.user_id}-${idx}`}
                       style={[
-                        styles.row,
+                        styles.listRow,
                         {
-                          backgroundColor: isMe
-                            ? `${colors.primary}10`
-                            : idx % 2 === 0
-                            ? colors.background
-                            : colors.surfaceVariant,
-                          borderLeftWidth: isMe ? 3 : 0,
-                          borderLeftColor: colors.primary,
+                          backgroundColor: emphasize ? `${colors.primary}08` : idx % 2 === 0 ? colors.surface : colors.surfaceVariant,
+                          borderColor: emphasize ? `${colors.primary}20` : colors.borderLight,
                         },
                       ]}
                     >
-                      <View style={styles.rankWrap}>
-                        {rd.emoji ? (
-                          <Text style={styles.rankEmoji}>{rd.emoji}</Text>
-                        ) : (
-                          <View style={[styles.rankCircle, { backgroundColor: colors.surfaceVariant }]}>
-                            <Text style={[styles.rankNum, { color: rd.color }]}>#{rank}</Text>
-                          </View>
-                        )}
+                      <View style={[styles.rankPill, { backgroundColor: emphasize ? `${colors.primary}18` : colors.surfaceVariant }]}>
+                        <Text style={[styles.rankPillText, { color: emphasize ? colors.primary : colors.textSecondary }]}>#{rank}</Text>
                       </View>
-                      <View style={styles.userCol}>
-                        <Text
-                          style={[
-                            styles.userName,
-                            { color: colors.text, fontWeight: isMe ? fontWeight.black : fontWeight.semibold },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {name}{isMe ? ' (You)' : ''}
+                      <View style={styles.nameWrap}>
+                        <Text style={[styles.rowName, { color: colors.text }]}>
+                          {getDisplayName(row)}{isMe ? ' (You)' : ''}
                         </Text>
                       </View>
-                      <Text style={[styles.timeVal, { color: rank <= 3 ? rd.color : colors.text }]}>
-                        {time}s
-                      </Text>
+                      <Text style={[styles.rowTime, { color: colors.text }]}>{(row.ms_taken / 1000).toFixed(2)}s</Text>
                     </View>
                   );
                 })}
               </Card>
 
               {currentUserId && !rows.some((r) => r.user_id === currentUserId) && (
-                <View style={[styles.notInList, { backgroundColor: colors.surfaceVariant }]}>
-                  <Text style={[styles.notInListText, { color: colors.textSecondary }]}>
-                    You haven't solved {timeFilter === 'today' ? "today's puzzle" : 'any puzzles in this period'} yet.
-                  </Text>
+                <Card style={styles.ctaCard} padding="md">
+                  <Text style={[styles.ctaText, { color: colors.textSecondary }]}>You are not on this board yet. Solve a puzzle to join the rankings.</Text>
                   {timeFilter === 'today' && (
-                    <Button
-                      title="Solve Now"
-                      onPress={() => router.push('/')}
-                      variant="outline"
-                      size="sm"
-                      fullWidth
-                      style={{ marginTop: spacing.sm }}
-                    />
+                    <Button title="Open Today's Puzzle" onPress={() => router.push('/')} variant="outline" fullWidth style={{ marginTop: spacing.sm }} />
                   )}
-                </View>
+                </Card>
+              )}
+
+              {others.length > 0 && (
+                <Text style={[styles.footerHint, { color: colors.textTertiary }]}>Showing top {rows.length} results.</Text>
               )}
             </>
           )}
@@ -397,78 +453,229 @@ export default function Leaderboard() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  backgroundLayer: { ...StyleSheet.absoluteFillObject },
+  bgOrbTop: {
+    position: 'absolute',
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    top: -95,
+    right: -70,
+  },
+  bgOrbBottom: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    bottom: 110,
+    left: -90,
+  },
+
   header: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    alignItems: 'center',
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
   },
-  headerTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
-  centerWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.md },
-  loadingText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
+  headerTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
+  headerSubtitle: { fontSize: fontSize.sm, marginTop: 2 },
 
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
     gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
   },
   filterTab: {
     flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
     borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
     alignItems: 'center',
   },
-  filterTabText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  filterLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  filterHint: { fontSize: fontSize.xs, marginTop: 2 },
+
+  centerWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.md },
+  loadingText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
 
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%' },
+  scrollContent: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+    alignSelf: 'center',
+    width: '100%',
+  },
 
-  // User Rank Card
-  userRankCard: { marginBottom: spacing.md, alignItems: 'center' },
-  userRankLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.medium, marginBottom: spacing.xs },
-  userRankRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
-  userRankValue: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black },
-  userRankDivider: { width: 1, height: 28 },
-  userRankTime: { fontSize: fontSize.xl, fontWeight: fontWeight.bold },
-
-  statsCard: { marginBottom: spacing.md },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  statItem: { flex: 1, alignItems: 'center' },
-  statVal: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
-  statLbl: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, marginTop: spacing.xs },
-  statDiv: { width: 1, height: 36 },
-
-  boardCard: { marginBottom: spacing.md },
-  boardTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.md },
-  row: {
+  heroCard: {
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  heroGlow: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    top: -70,
+    right: -50,
+  },
+  heroRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: fontSize['2xl'],
+    fontWeight: fontWeight.black,
+    marginTop: 2,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: fontSize.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  heroTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: 2,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
   },
-  rankWrap: { width: 44, alignItems: 'center' },
-  rankEmoji: { fontSize: fontSize.xl },
-  rankCircle: {
+  heroTagText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+  },
+  heroStatsRow: { flexDirection: 'row', gap: spacing.sm },
+  heroStatPill: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  heroStatValue: { color: '#fff', fontSize: fontSize.lg, fontWeight: fontWeight.black },
+  heroStatLabel: { color: 'rgba(255,255,255,0.85)', fontSize: fontSize.xs },
+
+  myRankCard: {
+    marginBottom: spacing.md,
+    borderRadius: borderRadius.lg,
+  },
+  myRankRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  myRankLabel: { fontSize: fontSize.sm },
+  myRankValue: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginTop: 2 },
+  myRankTimePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  myRankTime: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+
+  emptyCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  emptyTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.black,
+    marginBottom: spacing.xs,
+  },
+  emptyMsg: {
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+    maxWidth: 300,
+  },
+
+  kpiGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  kpiCard: { flex: 1, borderRadius: borderRadius.lg },
+  kpiLabel: { fontSize: fontSize.xs, marginBottom: 4 },
+  kpiValue: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
+
+  podiumCard: { marginBottom: spacing.md, borderRadius: borderRadius.xl },
+  boardCard: { marginBottom: spacing.md, borderRadius: borderRadius.xl },
+  cardTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.md },
+
+  podiumRow: {
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  listRow: {
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  rankIconWrap: {
     width: 32,
     height: 32,
-    borderRadius: borderRadius.full,
-    justifyContent: 'center',
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
   },
-  rankNum: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
-  userCol: { flex: 1, marginLeft: spacing.sm },
-  userName: { fontSize: fontSize.base },
-  timeVal: { fontSize: fontSize.base, fontWeight: fontWeight.black, marginLeft: spacing.sm },
+  rankPill: {
+    minWidth: 44,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  rankPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  nameWrap: { flex: 1, minWidth: 0 },
+  rowName: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
+  rowSub: { fontSize: fontSize.xs, marginTop: 2 },
+  rowTime: { fontSize: fontSize.base, fontWeight: fontWeight.black, marginLeft: spacing.sm },
 
-  emptyCard: { alignItems: 'center', paddingVertical: spacing.xxl },
-  emptyEmoji: { fontSize: 56, marginBottom: spacing.md },
-  emptyTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black, marginBottom: spacing.sm, textAlign: 'center' },
-  emptyMsg: { fontSize: fontSize.base, textAlign: 'center', maxWidth: 300 },
+  ctaCard: { marginBottom: spacing.sm, borderRadius: borderRadius.lg },
+  ctaText: { fontSize: fontSize.sm, textAlign: 'center' },
 
-  notInList: { padding: spacing.md, borderRadius: borderRadius.md, marginBottom: spacing.md },
-  notInListText: { fontSize: fontSize.sm, textAlign: 'center' },
+  footerHint: {
+    textAlign: 'center',
+    fontSize: fontSize.xs,
+    marginTop: spacing.xs,
+  },
 });
