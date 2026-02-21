@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
+import { getCurrentUserId, getTotalDmUnread } from '@/lib/dm';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
@@ -40,6 +43,7 @@ type Achievement = {
 };
 
 export default function Profile() {
+  const router = useRouter();
   const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -51,6 +55,7 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [recentAttempts, setRecentAttempts] = useState<PuzzleAttempt[]>([]);
   const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [dmUnread, setDmUnread] = useState(0);
   const [stats, setStats] = useState<UserStats>({
     total_attempts: 0,
     correct_attempts: 0,
@@ -63,6 +68,23 @@ export default function Profile() {
   useEffect(() => {
     loadProfile();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadDmUnread().catch(() => null);
+      return undefined;
+    }, []),
+  );
+
+  async function loadDmUnread() {
+    const uid = await getCurrentUserId();
+    if (!uid) {
+      setDmUnread(0);
+      return;
+    }
+    const count = await getTotalDmUnread(uid);
+    setDmUnread(count);
+  }
 
   async function loadProfile() {
     setLoading(true);
@@ -193,6 +215,7 @@ export default function Profile() {
           unlocked: allAttempts.length >= 20,
         },
       ]);
+      await loadDmUnread();
     } catch (e: any) {
       console.error('Profile load error:', e);
     } finally {
@@ -449,6 +472,29 @@ export default function Profile() {
             </Card>
 
             <Card style={styles.statsCard} padding="lg">
+              <Pressable
+                onPress={() => router.push('/messages')}
+                style={[styles.messagesRow, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              >
+                <View style={styles.messagesLeft}>
+                  <View style={[styles.messagesIcon, { backgroundColor: `${colors.primary}16` }]}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
+                  </View>
+                  <View>
+                    <Text style={[styles.messagesTitle, { color: colors.text }]}>Messages</Text>
+                    <Text style={[styles.messagesHint, { color: colors.textSecondary }]}>Open your DM inbox</Text>
+                  </View>
+                </View>
+                <View style={styles.messagesRight}>
+                  {dmUnread > 0 && (
+                    <View style={[styles.messagesBadge, { backgroundColor: colors.wrong }]}>
+                      <Text style={styles.messagesBadgeText}>{dmUnread > 99 ? '99+' : dmUnread}</Text>
+                    </View>
+                  )}
+                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                </View>
+              </Pressable>
+
               <SectionHeading
                 icon="stats-chart-outline"
                 title="Your Statistics"
@@ -845,6 +891,37 @@ const styles = StyleSheet.create({
   saveBtn: { marginTop: spacing.sm },
 
   statsCard: { marginBottom: spacing.md },
+  messagesRow: {
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  messagesLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
+  messagesIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messagesTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
+  messagesHint: { fontSize: fontSize.xs, marginTop: 2 },
+  messagesRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  messagesBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messagesBadgeText: { color: '#fff', fontSize: 11, fontWeight: fontWeight.bold },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

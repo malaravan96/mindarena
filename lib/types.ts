@@ -52,6 +52,47 @@ export interface LeaderboardEntry {
   rank: number;
 }
 
+export interface DmConversation {
+  id: string;
+  user_a: string;
+  user_b: string;
+  created_at: string;
+  last_message_at: string;
+  peer_id: string;
+  peer_name: string;
+  peer_avatar_url?: string | null;
+  last_message?: string;
+  unread_count: number;
+}
+
+export interface DmMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+}
+
+export interface PushToken {
+  id: string;
+  user_id: string;
+  expo_push_token: string;
+  platform: 'ios' | 'android' | 'web';
+  updated_at: string;
+}
+
+export interface PvpCallSession {
+  id: string;
+  match_id: string;
+  caller_id: string;
+  callee_id: string;
+  status: 'ringing' | 'connected' | 'ended' | 'failed';
+  started_at: string;
+  ended_at?: string | null;
+}
+
+export type CallUiState = 'off' | 'connecting' | 'live' | 'reconnecting';
+
 // Form types
 export interface RegisterFormData {
   email: string;

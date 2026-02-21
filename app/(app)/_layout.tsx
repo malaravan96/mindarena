@@ -1,12 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BlurView } from 'expo-blur';
 import { Platform, StyleSheet, View } from 'react-native';
+import { upsertCurrentUserPushToken } from '@/lib/push';
 
 export default function AppLayout() {
   const { colors, colorScheme } = useTheme();
+
+  useEffect(() => {
+    upsertCurrentUserPushToken().catch(() => null);
+  }, []);
 
   return (
     <Tabs
@@ -84,6 +89,12 @@ export default function AppLayout() {
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'settings' : 'settings-outline'} size={size + 2} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="messages"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

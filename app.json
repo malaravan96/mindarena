@@ -9,21 +9,51 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-dev-client",
+      "expo-notifications",
+      "@config-plugins/react-native-webrtc"
     ],
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "MindArena uses your microphone for live match voice calls."
+      },
+      "bitcode": false
     },
     "android": {
+      "package": "com.mindarena.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       }
     },
+    "notification": {
+      "color": "#2563eb",
+      "iosDisplayInForeground": true
+    },
     "web": {
       "bundler": "metro"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "528bd82b-26ec-4296-834e-3dbbe95def41"
+      }
     }
   }
 }

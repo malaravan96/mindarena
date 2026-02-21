@@ -14,10 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import { Audio } from 'expo-av';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { getItem, setItem } from '@/lib/storage';
+import { notifyIncomingMatchCall } from '@/lib/push';
+import { PvpWebRTCCall } from '@/lib/webrtcCall';
+import type { CallUiState } from '@/lib/types';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -73,7 +75,6 @@ const COUNTDOWN_SECS = 3;
 const FOUND_DELAY_MS = 1500;
 const INVITE_TIMEOUT_MS = 30_000;
 const CHAT_TEXT_LIMIT = 160;
-const CHAT_VOICE_BUCKET = 'pvp-voice';
 const QUICK_REACTIONS = ['🔥', '😂', '👏', '😮', '😈'];
 
 // ── Component ───────────────────────────────────────────────────────
@@ -122,9 +123,12 @@ export default function PvpScreen() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
   const [chatBusy, setChatBusy] = useState(false);
-  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
-  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [reactionToast, setReactionToast] = useState<{ emoji: string; fromName: string } | null>(null);
+
+  // Live call state
+  const [callState, setCallState] = useState<CallUiState>('off');
+  const [callMuted, setCallMuted] = useState(false);
+  const [opponentMuted, setOpponentMuted] = useState(false);
 
   // Refs for channels and timers
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
@@ -135,8 +139,8 @@ export default function PvpScreen() {
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const voicePlaybackRef = useRef<Audio.Sound | null>(null);
+  const callRef = useRef<PvpWebRTCCall | null>(null);
+  const callSessionIdRef = useRef<string | null>(null);
   const phaseRef = useRef<Phase>('lobby');
   const mySubmittedRef = useRef(false);
   const oppSubmittedRef = useRef(false);
@@ -145,6 +149,7 @@ export default function PvpScreen() {
   const isHostRef = useRef(false);
   const matchIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);
+  const opponentIdRef = useRef<string | null>(null);
   const statsRef = useRef<PvpStats>({ wins: 0, losses: 0, draws: 0 });
   const chatOpenRef = useRef(false);
 
@@ -152,6 +157,7 @@ export default function PvpScreen() {
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { matchIdRef.current = matchId; }, [matchId]);
   useEffect(() => { userIdRef.current = userId; }, [userId]);
+  useEffect(() => { opponentIdRef.current = opponentId; }, [opponentId]);
   useEffect(() => { statsRef.current = stats; }, [stats]);
   useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
 
@@ -259,28 +265,178 @@ export default function PvpScreen() {
     setLoadingPlayers(false);
   }
 
-  async function unloadVoicePlayback() {
-    if (!voicePlaybackRef.current) return;
-    try {
-      await voicePlaybackRef.current.unloadAsync();
-    } catch {
-      // ignore
-    }
-    voicePlaybackRef.current = null;
-    setPlayingVoiceId(null);
+  function isMatchLifecyclePhase(value: Phase) {
+    return value === 'found' || value === 'countdown' || value === 'playing' || value === 'waiting';
   }
 
-  async function stopVoiceRecordingSilently() {
-    if (!recordingRef.current) return;
-    try {
-      await recordingRef.current.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-    } catch {
-      // ignore
+  function buildIceServers() {
+    const list: { urls: string; username?: string; credential?: string }[] = [];
+    const stunUrl = process.env.EXPO_PUBLIC_STUN_URL || 'stun:stun.l.google.com:19302';
+    if (stunUrl) list.push({ urls: stunUrl });
+
+    const turnUrl = process.env.EXPO_PUBLIC_TURN_URL;
+    if (turnUrl) {
+      list.push({
+        urls: turnUrl,
+        username: process.env.EXPO_PUBLIC_TURN_USERNAME,
+        credential: process.env.EXPO_PUBLIC_TURN_CREDENTIAL,
+      });
     }
-    recordingRef.current = null;
-    setIsRecordingVoice(false);
-    setChatBusy(false);
+    return list;
+  }
+
+  function sendCallSignal(
+    event: 'call-offer' | 'call-answer' | 'call-ice' | 'call-state' | 'call-ended' | 'call-mute',
+    payload: Record<string, unknown>,
+  ) {
+    matchChannelRef.current?.send({
+      type: 'broadcast',
+      event,
+      payload,
+    });
+  }
+
+  function isValidOpponentPayload(payload: any) {
+    if (!payload || payload.matchId !== matchIdRef.current) return false;
+    if (!isMatchLifecyclePhase(phaseRef.current)) return false;
+    if (payload.playerId === userIdRef.current) return false;
+    if (opponentIdRef.current && payload.playerId !== opponentIdRef.current) return false;
+    return true;
+  }
+
+  async function updateCallSession(status: 'ringing' | 'connected' | 'ended' | 'failed') {
+    if (!callSessionIdRef.current) return;
+    await supabase
+      .from('pvp_call_sessions')
+      .update({
+        status,
+        ended_at: status === 'ended' || status === 'failed' ? new Date().toISOString() : null,
+      })
+      .eq('id', callSessionIdRef.current);
+  }
+
+  async function ensureLiveCallClient() {
+    if (Platform.OS === 'web') return null;
+    if (callRef.current) return callRef.current;
+    if (!matchIdRef.current || !userIdRef.current) return null;
+
+    const client = new PvpWebRTCCall({
+      matchId: matchIdRef.current,
+      userId: userIdRef.current,
+      iceServers: buildIceServers(),
+      sendSignal: (event, payload) => {
+        sendCallSignal(event, payload);
+      },
+      callbacks: {
+        onStateChange: (state) => {
+          setCallState(state);
+          sendCallSignal('call-state', {
+            matchId: matchIdRef.current,
+            playerId: userIdRef.current,
+            state,
+          });
+          if (state === 'live') {
+            updateCallSession('connected').catch(() => null);
+          }
+          if (state === 'off') {
+            setCallMuted(false);
+          }
+        },
+        onError: () => {
+          setCallState('reconnecting');
+        },
+      },
+    });
+
+    try {
+      await client.init();
+      callRef.current = client;
+      return client;
+    } catch {
+      setCallState('off');
+      return null;
+    }
+  }
+
+  async function createCallSessionIfHost() {
+    if (!isHostRef.current) return;
+    if (!matchIdRef.current || !userIdRef.current || !opponentIdRef.current) return;
+    if (callSessionIdRef.current) return;
+
+    const { data } = await supabase
+      .from('pvp_call_sessions')
+      .insert({
+        match_id: matchIdRef.current,
+        caller_id: userIdRef.current,
+        callee_id: opponentIdRef.current,
+        status: 'ringing',
+      })
+      .select('id')
+      .maybeSingle<{ id: string }>();
+
+    if (data?.id) callSessionIdRef.current = data.id;
+    await notifyIncomingMatchCall(matchIdRef.current, opponentIdRef.current, username).catch(() => null);
+  }
+
+  async function startLiveMatchCall() {
+    if (Platform.OS === 'web') return;
+    if (callRef.current) return;
+
+    const client = await ensureLiveCallClient();
+    if (!client) return;
+
+    setCallState('connecting');
+    if (isHostRef.current) {
+      await createCallSessionIfHost();
+      await client.startAsCaller();
+    }
+  }
+
+  async function handleCallOffer(payload: any) {
+    if (!isValidOpponentPayload(payload)) return;
+    const client = await ensureLiveCallClient();
+    if (!client || !payload.offer) return;
+    await client.handleOffer(payload.offer);
+  }
+
+  async function handleCallAnswer(payload: any) {
+    if (!isValidOpponentPayload(payload)) return;
+    if (!callRef.current || !payload.answer) return;
+    await callRef.current.handleAnswer(payload.answer);
+  }
+
+  async function handleCallIce(payload: any) {
+    if (!isValidOpponentPayload(payload)) return;
+    if (!callRef.current || !payload.candidate) return;
+    await callRef.current.handleIceCandidate(payload.candidate);
+  }
+
+  async function endLiveMatchCall(sendSignal: boolean, failed = false) {
+    const active = callRef.current;
+    callRef.current = null;
+    setCallMuted(false);
+    setOpponentMuted(false);
+    setCallState('off');
+
+    if (active) {
+      await active.close(sendSignal, failed ? 'failed' : 'off');
+    }
+
+    if (callSessionIdRef.current) {
+      await updateCallSession(failed ? 'failed' : 'ended');
+      callSessionIdRef.current = null;
+    }
+  }
+
+  async function toggleCallMute() {
+    if (!callRef.current) return;
+    const muted = callRef.current.toggleMute();
+    setCallMuted(muted);
+    sendCallSignal('call-mute', {
+      matchId: matchIdRef.current,
+      playerId: userIdRef.current,
+      muted,
+    });
   }
 
   function clearReactionToast() {
@@ -431,103 +587,6 @@ export default function PvpScreen() {
     }
   }
 
-  async function startVoiceRecording() {
-    if (Platform.OS === 'web' || isRecordingVoice || chatBusy || !matchId || !userId) return;
-
-    setChatBusy(true);
-    try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) return;
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
-
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await recording.startAsync();
-      recordingRef.current = recording;
-      setIsRecordingVoice(true);
-    } finally {
-      setChatBusy(false);
-    }
-  }
-
-  async function stopVoiceRecordingAndSend() {
-    if (!recordingRef.current || !matchId || !userId) return;
-
-    setChatBusy(true);
-    let localUri: string | null = null;
-    let durationMs = 0;
-
-    try {
-      const recording = recordingRef.current;
-      await recording.stopAndUnloadAsync();
-      const status = await recording.getStatusAsync();
-      durationMs = status.durationMillis ?? 0;
-      localUri = recording.getURI();
-
-      recordingRef.current = null;
-      setIsRecordingVoice(false);
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-
-      if (!localUri) return;
-
-      const response = await fetch(localUri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
-      const ext = blob.type?.includes('webm') ? 'webm' : 'm4a';
-      const filePath = `${matchId}/${userId}/${Date.now()}-${Crypto.randomUUID()}.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from(CHAT_VOICE_BUCKET)
-        .upload(filePath, arrayBuffer, {
-          contentType: blob.type || 'audio/m4a',
-          upsert: false,
-        });
-
-      if (uploadError) return;
-
-      const { data: urlData } = supabase.storage.from(CHAT_VOICE_BUCKET).getPublicUrl(filePath);
-      await persistChatMessage({
-        message_type: 'voice',
-        voice_url: urlData.publicUrl,
-        voice_duration_ms: durationMs,
-      });
-    } catch {
-      // ignore when bucket/policies are not ready
-    } finally {
-      setChatBusy(false);
-    }
-  }
-
-  async function playVoiceMessage(message: PvpChatMessage) {
-    if (!message.voice_url || !message.id) return;
-
-    await unloadVoicePlayback();
-
-    try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: message.voice_url },
-        { shouldPlay: true },
-      );
-      voicePlaybackRef.current = sound;
-      setPlayingVoiceId(message.id);
-
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded || status.didJustFinish) {
-          setPlayingVoiceId(null);
-          sound.unloadAsync().catch(() => null);
-          if (voicePlaybackRef.current === sound) voicePlaybackRef.current = null;
-        }
-      });
-    } catch {
-      setPlayingVoiceId(null);
-    }
-  }
-
   // ── Lobby Presence Channel ──────────────────────────────────────
   // Tracks who is currently on the Battle tab
 
@@ -598,8 +657,7 @@ export default function PvpScreen() {
       matchChannelRef.current = null;
     }
     closeChatSubscription();
-    void stopVoiceRecordingSilently();
-    void unloadVoicePlayback();
+    void endLiveMatchCall(false);
     clearReactionToast();
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
@@ -609,6 +667,7 @@ export default function PvpScreen() {
     myRevealRef.current = null;
     oppRevealRef.current = null;
     isHostRef.current = false;
+    callSessionIdRef.current = null;
   }
 
   function cleanupAll() {
@@ -814,6 +873,28 @@ export default function PvpScreen() {
           handleOpponentDisconnect();
         }
       })
+      .on('broadcast', { event: 'call-offer' }, ({ payload }) => {
+        void handleCallOffer(payload);
+      })
+      .on('broadcast', { event: 'call-answer' }, ({ payload }) => {
+        void handleCallAnswer(payload);
+      })
+      .on('broadcast', { event: 'call-ice' }, ({ payload }) => {
+        void handleCallIce(payload);
+      })
+      .on('broadcast', { event: 'call-state' }, ({ payload }) => {
+        if (!isValidOpponentPayload(payload)) return;
+        if (payload.state === 'reconnecting') setCallState('reconnecting');
+        if (payload.state === 'off') setCallState('off');
+      })
+      .on('broadcast', { event: 'call-ended' }, ({ payload }) => {
+        if (!isValidOpponentPayload(payload)) return;
+        void endLiveMatchCall(false);
+      })
+      .on('broadcast', { event: 'call-mute' }, ({ payload }) => {
+        if (!isValidOpponentPayload(payload)) return;
+        setOpponentMuted(!!payload.muted);
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           // Guest sends ready to signal they've joined
@@ -843,6 +924,7 @@ export default function PvpScreen() {
         setPhase('playing');
         setStartedAt(Date.now());
         startGameTimer();
+        void startLiveMatchCall();
       } else {
         setCountdownNum(count);
       }
@@ -941,6 +1023,7 @@ export default function PvpScreen() {
       supabase.removeChannel(matchChannelRef.current);
       matchChannelRef.current = null;
     }
+    void endLiveMatchCall(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }
 
@@ -957,6 +1040,7 @@ export default function PvpScreen() {
       supabase.removeChannel(matchChannelRef.current);
       matchChannelRef.current = null;
     }
+    void endLiveMatchCall(false);
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
   }
@@ -965,7 +1049,20 @@ export default function PvpScreen() {
 
   const getInitials = (name: string) => name.slice(0, 2).toUpperCase();
   const formatTime = (ms: number) => (ms / 1000).toFixed(1) + 's';
-  const formatVoiceDuration = (ms: number | null) => `${Math.max(1, Math.round((ms ?? 0) / 1000))}s`;
+  const callStateLabel =
+    callState === 'live'
+      ? 'Live voice'
+      : callState === 'connecting'
+        ? 'Connecting...'
+        : callState === 'reconnecting'
+          ? 'Reconnecting...'
+          : 'Voice off';
+  const callStateColor =
+    callState === 'live'
+      ? colors.correct
+      : callState === 'reconnecting'
+        ? colors.warning
+        : colors.textSecondary;
 
   // Merge online status into player list
   const playerList = players
@@ -978,6 +1075,7 @@ export default function PvpScreen() {
   const totalMatches = stats.wins + stats.losses + stats.draws;
   const winRate = totalMatches > 0 ? Math.round((stats.wins / totalMatches) * 100) : 0;
   const matchHasChat = phase !== 'lobby' && !!matchId;
+  const showCallControls = phase === 'playing' || phase === 'waiting';
   const unreadLabel = chatUnread > 99 ? '99+' : `${chatUnread}`;
 
   return (
@@ -1417,6 +1515,62 @@ export default function PvpScreen() {
           </>
         )}
 
+        {showCallControls && (
+          <Card style={styles.card} padding="md">
+            <View style={styles.callHeaderRow}>
+              <View style={[styles.callStatePill, { backgroundColor: `${callStateColor}16` }]}>
+                <View style={[styles.callStateDot, { backgroundColor: callStateColor }]} />
+                <Text style={[styles.callStateText, { color: callStateColor }]}>{callStateLabel}</Text>
+              </View>
+              {opponentMuted && (
+                <Text style={[styles.remoteMuteText, { color: colors.textSecondary }]}>Opponent muted</Text>
+              )}
+            </View>
+
+            {Platform.OS === 'web' ? (
+              <Text style={[styles.voiceUnavailable, { color: colors.textSecondary }]}>
+                Live voice call is available on Android/iOS dev build or release build.
+              </Text>
+            ) : (
+              <View style={styles.callControlsRow}>
+                <Pressable
+                  onPress={() => toggleCallMute()}
+                  style={[
+                    styles.callControlBtn,
+                    {
+                      backgroundColor: callMuted ? `${colors.warning}16` : `${colors.primary}14`,
+                      borderColor: callMuted ? `${colors.warning}35` : `${colors.primary}30`,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={callMuted ? 'mic-off-outline' : 'mic-outline'}
+                    size={16}
+                    color={callMuted ? colors.warning : colors.primary}
+                  />
+                  <Text style={[styles.callControlText, { color: callMuted ? colors.warning : colors.primary }]}>
+                    {callMuted ? 'Unmute' : 'Mute'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => endLiveMatchCall(true)}
+                  style={[
+                    styles.callControlBtn,
+                    {
+                      backgroundColor: `${colors.wrong}14`,
+                      borderColor: `${colors.wrong}30`,
+                    },
+                  ]}
+                >
+                  <Ionicons name="call-outline" size={16} color={colors.wrong} />
+                  <Text style={[styles.callControlText, { color: colors.wrong }]}>Leave Voice</Text>
+                </Pressable>
+              </View>
+            )}
+          </Card>
+        )}
+
         {matchHasChat && (
           <Card style={styles.card} padding="md">
             <Pressable
@@ -1464,7 +1618,7 @@ export default function PvpScreen() {
                 <ScrollView style={styles.chatLog} contentContainerStyle={styles.chatLogContent} nestedScrollEnabled>
                   {chatMessages.length === 0 ? (
                     <Text style={[styles.emptyChatText, { color: colors.textSecondary }]}>
-                      No messages yet. Send a reaction, text, or voice clip.
+                      No messages yet. Send a reaction or text.
                     </Text>
                   ) : (
                     chatMessages.map((msg) => {
@@ -1487,19 +1641,9 @@ export default function PvpScreen() {
                               <Text style={styles.chatEmojiOnly}>{msg.emoji}</Text>
                             )}
                             {msg.message_type === 'voice' && (
-                              <Pressable
-                                onPress={() => playVoiceMessage(msg)}
-                                style={[styles.voiceBubbleBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                              >
-                                <Ionicons
-                                  name={playingVoiceId === msg.id ? 'pause-circle' : 'play-circle'}
-                                  size={18}
-                                  color={colors.primary}
-                                />
-                                <Text style={[styles.voiceBubbleText, { color: colors.text }]}>
-                                  Voice {formatVoiceDuration(msg.voice_duration_ms)}
-                                </Text>
-                              </Pressable>
+                              <Text style={[styles.chatMessageText, { color: colors.textSecondary }]}>
+                                Voice clip
+                              </Text>
                             )}
                           </View>
                           <Text style={[styles.chatTime, { color: colors.textTertiary }]}>
@@ -1539,38 +1683,6 @@ export default function PvpScreen() {
                     <Ionicons name="send" size={15} color="#fff" />
                   </Pressable>
                 </View>
-
-                <Pressable
-                  onPressIn={startVoiceRecording}
-                  onPressOut={stopVoiceRecordingAndSend}
-                  disabled={chatBusy || Platform.OS === 'web'}
-                  style={[
-                    styles.holdToTalkBtn,
-                    {
-                      borderColor: isRecordingVoice ? colors.correct : colors.border,
-                      backgroundColor: isRecordingVoice ? `${colors.correct}14` : colors.surfaceVariant,
-                      opacity: Platform.OS === 'web' ? 0.55 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={isRecordingVoice ? 'mic' : 'mic-outline'}
-                    size={17}
-                    color={isRecordingVoice ? colors.correct : colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.holdToTalkText,
-                      { color: isRecordingVoice ? colors.correct : colors.textSecondary },
-                    ]}
-                  >
-                    {Platform.OS === 'web'
-                      ? 'Voice chat works on Android/iOS app'
-                      : isRecordingVoice
-                        ? 'Recording... release to send'
-                        : 'Hold to talk'}
-                  </Text>
-                </Pressable>
               </>
             )}
           </Card>
@@ -1963,16 +2075,6 @@ const styles = StyleSheet.create({
   },
   chatMessageText: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.5 },
   chatEmojiOnly: { fontSize: 28, lineHeight: 34 },
-  voiceBubbleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  voiceBubbleText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
   chatTime: { fontSize: fontSize.xs },
   chatComposerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   chatInput: {
@@ -1990,15 +2092,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  holdToTalkBtn: {
-    marginTop: spacing.sm,
+  callHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  callStatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  callStateDot: { width: 8, height: 8, borderRadius: 4 },
+  callStateText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  remoteMuteText: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
+  voiceUnavailable: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.45 },
+  callControlsRow: { flexDirection: 'row', gap: spacing.sm },
+  callControlBtn: {
+    flex: 1,
     borderWidth: 1,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.sm,
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.xs,
   },
-  holdToTalkText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
+  callControlText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 });

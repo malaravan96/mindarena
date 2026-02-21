@@ -9,5 +9,8 @@
         "./*"
       ]
     }
-  }
+  },
+  "exclude": [
+    "supabase/functions/**/*"
+  ]
 }
