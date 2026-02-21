@@ -248,7 +248,7 @@ export default function Profile() {
       const uid = userData.user?.id;
       if (!uid) throw new Error('Not signed in');
 
-      const filePath = `${uid}.jpg`;
+      const filePath = `${uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
 
       const response = await fetch(asset.uri);
       const blob = await response.blob();
@@ -258,20 +258,25 @@ export default function Profile() {
         .from('avatars')
         .upload(filePath, arrayBuffer, {
           contentType: 'image/jpeg',
-          upsert: true,
+          upsert: false,
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
 
       const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
       const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', uid);
+        .upsert(
+          {
+            id: uid,
+            avatar_url: publicUrl,
+          },
+          { onConflict: 'id' },
+        );
 
-      if (updateError) throw updateError;
+      if (updateError) throw new Error(`Profile update failed: ${updateError.message}`);
 
       setAvatarUrl(publicUrl);
     } catch (e: any) {

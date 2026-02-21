@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -71,6 +72,21 @@ export default function ChatScreen() {
     };
   }, [loadData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const uid = userId ?? (await getCurrentUserId());
+        if (!uid || !active) return;
+        if (!userId) setUserId(uid);
+        await loadData(uid);
+      })();
+      return () => {
+        active = false;
+      };
+    }, [userId, loadData]),
+  );
+
   async function openConversation(peerUserId: string) {
     const id = await getOrCreateConversation(peerUserId);
     router.push({ pathname: '/chat-thread', params: { conversationId: id } });
@@ -110,11 +126,15 @@ export default function ChatScreen() {
                   }
                   style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
                 >
-                  <View style={[styles.avatar, { backgroundColor: `${colors.primary}16` }]}>
-                    <Text style={[styles.avatarText, { color: colors.primary }]}>
-                      {(item.peer_name || 'P').slice(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
+                  {item.peer_avatar_url ? (
+                    <Image source={{ uri: item.peer_avatar_url }} style={styles.avatarImage} />
+                  ) : (
+                    <View style={[styles.avatar, { backgroundColor: `${colors.primary}16` }]}>
+                      <Text style={[styles.avatarText, { color: colors.primary }]}>
+                        {(item.peer_name || 'P').slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
 
                   <View style={styles.rowMain}>
                     <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
@@ -148,11 +168,15 @@ export default function ChatScreen() {
                 onPress={() => openConversation(peer.id)}
                 style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]}
               >
-                <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
-                  <Text style={[styles.avatarText, { color: colors.secondary }]}>
-                    {(peer.display_name || peer.username || 'P').slice(0, 2).toUpperCase()}
-                  </Text>
-                </View>
+                {peer.avatar_url ? (
+                  <Image source={{ uri: peer.avatar_url }} style={styles.avatarImage} />
+                ) : (
+                  <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
+                    <Text style={[styles.avatarText, { color: colors.secondary }]}>
+                      {(peer.display_name || peer.username || 'P').slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.rowMain}>
                   <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
                     {peer.display_name || peer.username || 'Player'}
@@ -212,6 +236,11 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarImage: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
   },
   avatarText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
   rowMain: { flex: 1 },

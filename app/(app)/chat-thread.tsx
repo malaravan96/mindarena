@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,6 +19,7 @@ export default function MessageThreadScreen() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [peerName, setPeerName] = useState('Player');
+  const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(null);
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -52,10 +53,11 @@ export default function MessageThreadScreen() {
         const peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name, username')
+          .select('display_name, username, avatar_url')
           .eq('id', peerId)
-          .maybeSingle<{ display_name: string | null; username: string | null }>();
+          .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null }>();
         setPeerName(profile?.display_name || profile?.username || 'Player');
+        setPeerAvatarUrl(profile?.avatar_url ?? null);
       }
     }
     setLoading(false);
@@ -133,6 +135,15 @@ export default function MessageThreadScreen() {
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={18} color={colors.text} />
         </Pressable>
+        {peerAvatarUrl ? (
+          <Image source={{ uri: peerAvatarUrl }} style={styles.headerAvatarImage} />
+        ) : (
+          <View style={[styles.headerAvatarFallback, { backgroundColor: `${colors.primary}16` }]}>
+            <Text style={[styles.headerAvatarText, { color: colors.primary }]}>
+              {peerName.slice(0, 2).toUpperCase()}
+            </Text>
+          </View>
+        )}
         <View style={styles.headerTitleWrap}>
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {peerName}
@@ -233,6 +244,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerAvatarImage: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  headerAvatarFallback: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerAvatarText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   headerTitleWrap: { flex: 1 },
   headerTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
   headerSubtitle: { fontSize: fontSize.xs, marginTop: 2 },

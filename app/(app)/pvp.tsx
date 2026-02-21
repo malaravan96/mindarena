@@ -9,10 +9,12 @@ import {
   AppState,
   TextInput,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
@@ -44,6 +46,7 @@ type PlayerInfo = {
   id: string;
   username: string;
   display_name?: string;
+  avatar_url?: string | null;
   total_points: number;
   online: boolean;
 };
@@ -85,6 +88,7 @@ export default function PvpScreen() {
   // Auth
   const [userId, setUserId] = useState<string | null>(null);
   const [username, setUsername] = useState('Player');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   // State machine
   const [phase, setPhase] = useState<Phase>('lobby');
@@ -103,6 +107,7 @@ export default function PvpScreen() {
   const [matchId, setMatchId] = useState<string | null>(null);
   const [opponentName, setOpponentName] = useState('Opponent');
   const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [opponentAvatarUrl, setOpponentAvatarUrl] = useState<string | null>(null);
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [countdownNum, setCountdownNum] = useState(COUNTDOWN_SECS);
 
@@ -160,6 +165,11 @@ export default function PvpScreen() {
   useEffect(() => { opponentIdRef.current = opponentId; }, [opponentId]);
   useEffect(() => { statsRef.current = stats; }, [stats]);
   useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
+  useEffect(() => {
+    if (!opponentId) return;
+    const avatar = players.find((p) => p.id === opponentId)?.avatar_url ?? null;
+    if (avatar) setOpponentAvatarUrl(avatar);
+  }, [players, opponentId]);
 
   // ── Init: load user, stats, players, presence ───────────────────
 
@@ -172,10 +182,11 @@ export default function PvpScreen() {
         setUserId(uid);
         const { data: profile } = await supabase
           .from('profiles')
-          .select('username')
+          .select('username, avatar_url')
           .eq('id', uid)
-          .maybeSingle<{ username: string }>();
+          .maybeSingle<{ username: string; avatar_url: string | null }>();
         if (profile?.username && mounted) setUsername(profile.username);
+        if (mounted) setAvatarUrl(profile?.avatar_url ?? null);
 
         // Join presence + invite channels once we have uid
         joinLobbyPresence(uid, profile?.username ?? 'Player');
@@ -224,6 +235,15 @@ export default function PvpScreen() {
     if (chatOpen) setChatUnread(0);
   }, [chatOpen]);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      void refreshCurrentProfile();
+      void fetchPlayers();
+      if (opponentId) void loadOpponentAvatar(opponentId);
+      return undefined;
+    }, [opponentId]),
+  );
+
   // ── Data Loading ────────────────────────────────────────────────
 
   async function loadStats() {
@@ -248,7 +268,7 @@ export default function PvpScreen() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, total_points')
+        .select('id, username, display_name, avatar_url, total_points')
         .order('total_points', { ascending: false });
       if (!error && data) {
         setPlayers(
@@ -256,6 +276,7 @@ export default function PvpScreen() {
             id: p.id,
             username: p.username,
             display_name: p.display_name,
+            avatar_url: p.avatar_url ?? null,
             total_points: p.total_points ?? 0,
             online: false, // updated by presence
           })),
@@ -263,6 +284,41 @@ export default function PvpScreen() {
       }
     } catch { /* ignore */ }
     setLoadingPlayers(false);
+  }
+
+  async function refreshCurrentProfile() {
+    const { data } = await supabase.auth.getUser();
+    const uid = data.user?.id;
+    if (!uid) return;
+
+    setUserId(uid);
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('username, avatar_url')
+      .eq('id', uid)
+      .maybeSingle<{ username: string; avatar_url: string | null }>();
+
+    if (profile?.username) setUsername(profile.username);
+    setAvatarUrl(profile?.avatar_url ?? null);
+  }
+
+  async function loadOpponentAvatar(targetUserId: string) {
+    const cached = players.find((p) => p.id === targetUserId)?.avatar_url;
+    if (cached) {
+      setOpponentAvatarUrl(cached);
+      return;
+    }
+
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', targetUserId)
+        .maybeSingle<{ avatar_url: string | null }>();
+      setOpponentAvatarUrl(data?.avatar_url ?? null);
+    } catch {
+      setOpponentAvatarUrl(null);
+    }
   }
 
   function isMatchLifecyclePhase(value: Phase) {
@@ -689,6 +745,7 @@ export default function PvpScreen() {
     setMatchId(null);
     setOpponentName('Opponent');
     setOpponentId(null);
+    setOpponentAvatarUrl(null);
     setPuzzle(null);
     setCountdownNum(COUNTDOWN_SECS);
     setSelected(null);
@@ -715,6 +772,8 @@ export default function PvpScreen() {
     setInvitedPlayer(player);
     setOpponentName(player.username);
     setOpponentId(player.id);
+    setOpponentAvatarUrl(player.avatar_url ?? null);
+    void loadOpponentAvatar(player.id);
     setMatchId(newMatchId);
     setPuzzle(offlinePuzzles[puzzleIndex]);
     isHostRef.current = true;
@@ -796,6 +855,8 @@ export default function PvpScreen() {
     setMatchId(mId);
     setOpponentName(fromName);
     setOpponentId(fromId);
+    setOpponentAvatarUrl(players.find((p) => p.id === fromId)?.avatar_url ?? null);
+    void loadOpponentAvatar(fromId);
     setPuzzle(offlinePuzzles[puzzleIndex]);
     isHostRef.current = false;
     setPendingInvite(null);
@@ -1222,14 +1283,18 @@ export default function PvpScreen() {
                       { backgroundColor: player.online ? `${colors.primary}16` : colors.surfaceVariant },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.playerAvatarText,
-                        { color: player.online ? colors.primary : colors.textTertiary },
-                      ]}
-                    >
-                      {getInitials(player.username)}
-                    </Text>
+                    {player.avatar_url ? (
+                      <Image source={{ uri: player.avatar_url }} style={styles.playerAvatarImage} />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.playerAvatarText,
+                          { color: player.online ? colors.primary : colors.textTertiary },
+                        ]}
+                      >
+                        {getInitials(player.display_name || player.username)}
+                      </Text>
+                    )}
                   </View>
 
                   <View style={styles.playerInfo}>
@@ -1308,7 +1373,11 @@ export default function PvpScreen() {
               <View style={styles.vsRow}>
                 <View style={styles.playerCircleWrap}>
                   <View style={[styles.playerCircle, { backgroundColor: `${colors.primary}16`, borderColor: colors.primary }]}>
-                    <Text style={[styles.playerInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
+                    {avatarUrl ? (
+                      <Image source={{ uri: avatarUrl }} style={styles.playerCircleImage} />
+                    ) : (
+                      <Text style={[styles.playerInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
+                    )}
                   </View>
                   <Text style={[styles.circleLabel, { color: colors.text }]}>You</Text>
                 </View>
@@ -1319,7 +1388,11 @@ export default function PvpScreen() {
 
                 <View style={styles.playerCircleWrap}>
                   <View style={[styles.playerCircle, { backgroundColor: `${colors.wrong}16`, borderColor: colors.wrong }]}>
-                    <Text style={[styles.playerInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
+                    {opponentAvatarUrl ? (
+                      <Image source={{ uri: opponentAvatarUrl }} style={styles.playerCircleImage} />
+                    ) : (
+                      <Text style={[styles.playerInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
+                    )}
                   </View>
                   <Text style={[styles.circleLabel, { color: colors.text }]}>{opponentName}</Text>
                 </View>
@@ -1468,7 +1541,11 @@ export default function PvpScreen() {
                   <View style={styles.comparisonCol}>
                     <Text style={[styles.compLabel, { color: colors.textSecondary }]}>You</Text>
                     <View style={[styles.compCircle, { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}>
-                      <Text style={[styles.compInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
+                      {avatarUrl ? (
+                        <Image source={{ uri: avatarUrl }} style={styles.compAvatarImage} />
+                      ) : (
+                        <Text style={[styles.compInitials, { color: colors.primary }]}>{getInitials(username)}</Text>
+                      )}
                     </View>
                     <View style={[styles.compBadge, { backgroundColor: myReveal.isCorrect ? `${colors.correct}14` : `${colors.wrong}14` }]}>
                       <Text style={{ color: myReveal.isCorrect ? colors.correct : colors.wrong, fontSize: fontSize.xs, fontWeight: fontWeight.bold }}>
@@ -1485,7 +1562,11 @@ export default function PvpScreen() {
                   <View style={styles.comparisonCol}>
                     <Text style={[styles.compLabel, { color: colors.textSecondary }]}>{opponentName}</Text>
                     <View style={[styles.compCircle, { backgroundColor: `${colors.wrong}15`, borderColor: colors.wrong }]}>
-                      <Text style={[styles.compInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
+                      {opponentAvatarUrl ? (
+                        <Image source={{ uri: opponentAvatarUrl }} style={styles.compAvatarImage} />
+                      ) : (
+                        <Text style={[styles.compInitials, { color: colors.wrong }]}>{getInitials(opponentName)}</Text>
+                      )}
                     </View>
                     {oppReveal ? (
                       <>
@@ -1857,6 +1938,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
+  },
+  playerAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   playerAvatarText: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
   playerInfo: { flex: 1, marginLeft: spacing.md },
@@ -1918,6 +2004,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
+    overflow: 'hidden',
+  },
+  playerCircleImage: {
+    width: '100%',
+    height: '100%',
   },
   playerInitials: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black },
   circleLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
@@ -2019,6 +2110,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
+    overflow: 'hidden',
+  },
+  compAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   compInitials: { fontSize: fontSize.lg, fontWeight: fontWeight.black },
   compBadge: {

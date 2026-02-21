@@ -92,6 +92,14 @@ Your schema includes RLS policies. Verify they're enabled:
    - ✅ `puzzles`: Public read access
    - ✅ `attempts`: Users can insert own, read all (for leaderboard)
 
+## Step 5.5: Configure Avatar Storage (Required for Profile Image Upload)
+
+1. Go to **SQL Editor** in Supabase Dashboard
+2. Copy the contents of `supabase/avatar-storage.sql`
+3. Run the query
+
+This creates the `avatars` bucket and required `storage.objects` policies for uploads to `<user-id>/...`.
+
 ## Step 6: Test the Application
 
 ### Install Dependencies
