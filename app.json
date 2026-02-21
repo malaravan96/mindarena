@@ -5,6 +5,7 @@
     "scheme": "mindarena",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "automatic",
     "plugins": [
       "expo-router",
@@ -39,6 +40,7 @@
         "android.permission.BLUETOOTH"
       ],
       "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#ffffff"
       }
     },
