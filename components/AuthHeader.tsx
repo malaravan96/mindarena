@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 
@@ -16,33 +17,35 @@ export function AuthHeader({ icon, title, subtitle, onBack }: AuthHeaderProps) {
 
   return (
     <View style={styles.container}>
-      {/* Pseudo-gradient background */}
-      <View style={[styles.bgLayer, { backgroundColor: colors.gradientStart, opacity: 0.12 }]} />
-      <View style={[styles.bgLayerEnd, { backgroundColor: colors.gradientEnd, opacity: 0.08 }]} />
+      <LinearGradient
+        colors={[`${colors.gradientStart}1f`, `${colors.gradientEnd}08`]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.bgLayer}
+      />
 
-      {/* Back button */}
       {onBack && (
         <Pressable
           onPress={onBack}
-          style={[styles.backBtn, { backgroundColor: `${colors.text}10` }]}
+          style={[styles.backBtn, { backgroundColor: `${colors.surface}cc`, borderColor: colors.border }]}
           hitSlop={12}
         >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
+          <Ionicons name="arrow-back" size={18} color={colors.text} />
         </Pressable>
       )}
 
-      {/* Icon circle */}
-      <View style={[styles.iconCircle, { backgroundColor: colors.primary }]}>
+      <LinearGradient
+        colors={[colors.gradientStart, colors.gradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.iconCircle}
+      >
         {icon}
-      </View>
+      </LinearGradient>
 
-      {/* Title */}
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
 
-      {/* Subtitle */}
-      {subtitle && (
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
-      )}
+      {subtitle ? <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text> : null}
     </View>
   );
 }
@@ -55,22 +58,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
     paddingHorizontal: spacing.md,
     overflow: 'hidden',
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
     marginBottom: spacing.lg,
     position: 'relative',
   },
   bgLayer: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: borderRadius.lg,
-  },
-  bgLayerEnd: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: '50%',
-    borderTopRightRadius: borderRadius.lg,
-    borderBottomRightRadius: borderRadius.lg,
+    borderRadius: borderRadius.xl,
   },
   backBtn: {
     position: 'absolute',
@@ -79,14 +73,15 @@ const styles = StyleSheet.create({
     zIndex: 2,
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
@@ -101,6 +96,7 @@ const styles = StyleSheet.create({
     fontWeight: fontWeight.medium,
     textAlign: 'center',
     marginTop: spacing.xs,
-    maxWidth: 340,
+    maxWidth: 360,
+    lineHeight: fontSize.base * 1.4,
   },
 });

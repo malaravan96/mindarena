@@ -1,16 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, TextInput } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { AuthHeader } from '@/components/AuthHeader';
-import { ThemeAccessButton } from '@/components/ThemeAccessButton';
-import { Container } from '@/components/Container';
+import { AuthScaffold } from '@/components/auth/AuthScaffold';
+import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing } from '@/constants/theme';
+import {
+  borderRadius,
+  fontSize,
+  fontWeight,
+  isDesktop,
+  isTablet,
+  spacing,
+} from '@/constants/theme';
 import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 const OTP_LENGTH = 6;
@@ -27,7 +34,6 @@ export default function VerifyEmail() {
   const anim = useEntryAnimation();
 
   useEffect(() => {
-    // If email wasn't passed as a param, try to get it from the session
     if (!email) {
       loadUserEmail();
     }
@@ -69,10 +75,7 @@ export default function VerifyEmail() {
     } catch (e: any) {
       console.error('Email verification error:', e);
       setError(e?.message || 'Invalid or expired code. Please try again.');
-      showAlert(
-        'Verification Failed',
-        e?.message || 'Invalid or expired code. Please try again.',
-      );
+      showAlert('Verification Failed', e?.message || 'Invalid or expired code. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -96,10 +99,7 @@ export default function VerifyEmail() {
 
       if (error) throw error;
 
-      showAlert(
-        'Code Sent!',
-        'We sent a new verification code to your email.',
-      );
+      showAlert('Code Sent!', 'We sent a new verification code to your email.');
     } catch (e: any) {
       console.error('Resend verification error:', e);
       setError(e?.message || 'Failed to resend verification code.');
@@ -145,191 +145,153 @@ export default function VerifyEmail() {
     router.replace('/(app)');
   }
 
-  return (
-    <Container style={styles.container}>
-      <ThemeAccessButton />
+  const maxWidth = isDesktop ? 520 : isTablet ? 580 : '100%';
 
-      <Animated.View style={[styles.content, { backgroundColor: colors.background }, anim]}>
-        <AuthHeader
-          icon={<Ionicons name="mail-open-outline" size={34} color="#ffffff" />}
-          title="Verify Your Email"
-          subtitle="One last step to secure your account"
+  return (
+    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
+      <AuthHeader
+        icon={<Ionicons name="mail-open-outline" size={34} color="#ffffff" />}
+        title="Verify Your Email"
+        subtitle="One last step to secure and activate your account"
+      />
+
+      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
+        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
+          <Ionicons name="checkmark-circle-outline" size={14} color={colors.primary} />
+          <Text style={[styles.badgeText, { color: colors.primary }]}>Account Confirmation</Text>
+        </View>
+
+        <Text style={[styles.title, { color: colors.text }]}>Confirm your inbox code</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>We sent a verification code to your email address.</Text>
+
+        <View style={[styles.emailPill, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}> 
+          <Ionicons name="mail-outline" size={14} color={colors.textSecondary} />
+          <Text style={[styles.emailText, { color: colors.primary }]} numberOfLines={1}>{email}</Text>
+        </View>
+
+        <OtpInputRow
+          otp={otp}
+          error={error}
+          loading={loading}
+          inputRefs={otpRefs}
+          onChange={handleOtpChange}
+          onKeyPress={handleOtpKeyPress}
+          autoFocusFirst
         />
 
-        <Card style={styles.card}>
-          <Text style={[styles.message, { color: colors.text }]}>
-            We sent a verification code to:
-          </Text>
-          <Text style={[styles.email, { color: colors.primary, fontWeight: fontWeight.bold }]}>
-            {email}
-          </Text>
+        {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
 
+        <Button
+          title={loading ? 'Verifying...' : 'Verify Email'}
+          onPress={handleVerifyCode}
+          disabled={loading || otp.join('').length !== OTP_LENGTH}
+          loading={loading}
+          variant="gradient"
+          fullWidth
+          style={styles.primaryCta}
+        />
+
+        <View style={styles.resendRow}>
+          <Text style={[styles.resendText, { color: colors.textSecondary }]}>Didn't receive the code?</Text>
           <Text
+            onPress={!loading ? resendVerification : undefined}
             style={[
-              styles.message,
-              { color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.lg },
+              styles.resendLink,
+              { color: loading ? colors.textSecondary : colors.primary },
             ]}
           >
-            Enter the 6-digit code below to verify your email
+            Resend
           </Text>
+        </View>
 
-          {/* OTP Input Boxes */}
-          <View style={styles.otpContainer}>
-            {otp.map((digit, index) => (
-              <TextInput
-                key={index}
-                ref={(ref) => {
-                  otpRefs.current[index] = ref;
-                }}
-                style={[
-                  styles.otpBox,
-                  {
-                    borderColor: digit
-                      ? colors.primary
-                      : error
-                      ? colors.error
-                      : colors.border,
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                  },
-                ]}
-                value={digit}
-                onChangeText={(text) => handleOtpChange(text, index)}
-                onKeyPress={({ nativeEvent }) =>
-                  handleOtpKeyPress(nativeEvent.key, index)
-                }
-                keyboardType="number-pad"
-                maxLength={index === 0 ? OTP_LENGTH : 1}
-                selectTextOnFocus
-                editable={!loading}
-              />
-            ))}
-          </View>
+        <Button
+          title="Continue to App"
+          onPress={skipVerification}
+          variant="outline"
+          fullWidth
+          style={styles.secondaryCta}
+        />
 
-          {error ? (
-            <Text
-              style={[
-                styles.errorText,
-                { color: colors.error, fontSize: fontSize.sm },
-              ]}
-            >
-              {error}
-            </Text>
-          ) : null}
-
-          <View style={styles.actions}>
-            <Button
-              title={loading ? 'Verifying...' : 'Verify Email'}
-              onPress={handleVerifyCode}
-              disabled={loading || otp.join('').length !== OTP_LENGTH}
-              loading={loading}
-              variant="gradient"
-              fullWidth
-            />
-
-            <View style={styles.resendRow}>
-              <Text style={[styles.resendText, { color: colors.textSecondary }]}>
-                Didn't receive the code?{' '}
-              </Text>
-              <Text
-                onPress={!loading ? resendVerification : undefined}
-                style={[
-                  styles.resendLink,
-                  {
-                    color: loading ? colors.textSecondary : colors.primary,
-                    fontWeight: fontWeight.bold,
-                  },
-                ]}
-              >
-                Resend
-              </Text>
-            </View>
-
-            <Button
-              title="Continue to App"
-              onPress={skipVerification}
-              variant="outline"
-              fullWidth
-              style={{ marginTop: spacing.sm }}
-            />
-          </View>
-
-          <Text
-            style={[
-              styles.helperText,
-              {
-                color: colors.textTertiary,
-                fontSize: fontSize.xs,
-                marginTop: spacing.md,
-              },
-            ]}
-          >
-            You can verify your email later from your profile settings
-          </Text>
-        </Card>
-      </Animated.View>
-    </Container>
+        <Text style={[styles.helperText, { color: colors.textTertiary }]}>You can verify later from your profile settings if needed.</Text>
+      </Card>
+    </AuthScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
   card: {
     width: '100%',
-    maxWidth: 500,
+    borderRadius: borderRadius.xl,
   },
-  message: {
-    fontSize: fontSize.base,
-    textAlign: 'center',
-  },
-  email: {
-    fontSize: fontSize.lg,
-    textAlign: 'center',
-    marginTop: spacing.xs,
-  },
-  otpContainer: {
+  badge: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 10,
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
     marginBottom: spacing.sm,
   },
-  otpBox: {
-    width: 48,
-    height: 56,
-    borderWidth: 2,
-    borderRadius: 12,
-    textAlign: 'center',
-    fontSize: 24,
-    fontWeight: '700',
+  badgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    textTransform: 'uppercase',
+  },
+  title: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.black,
+  },
+  subtitle: {
+    fontSize: fontSize.sm,
+    marginTop: 4,
+    marginBottom: spacing.md,
+    lineHeight: fontSize.sm * 1.35,
+  },
+  emailPill: {
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  emailText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+    flex: 1,
   },
   errorText: {
     textAlign: 'center',
-    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    fontSize: fontSize.sm,
   },
-  actions: {
-    marginTop: spacing.lg,
+  primaryCta: {
+    borderRadius: borderRadius.full,
   },
   resendRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: spacing.md,
+    gap: spacing.xs,
   },
   resendText: {
     fontSize: fontSize.sm,
   },
   resendLink: {
     fontSize: fontSize.sm,
+    fontWeight: fontWeight.bold,
+  },
+  secondaryCta: {
+    marginTop: spacing.md,
+    borderRadius: borderRadius.full,
   },
   helperText: {
     textAlign: 'center',
+    fontSize: fontSize.xs,
+    marginTop: spacing.md,
   },
 });

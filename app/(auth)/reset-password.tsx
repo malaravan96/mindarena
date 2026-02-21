@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
@@ -8,10 +8,17 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
 import { AuthHeader } from '@/components/AuthHeader';
-import { ThemeAccessButton } from '@/components/ThemeAccessButton';
 import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
+import { AuthScaffold } from '@/components/auth/AuthScaffold';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing, isDesktop, isTablet } from '@/constants/theme';
+import {
+  borderRadius,
+  fontSize,
+  fontWeight,
+  isDesktop,
+  isTablet,
+  spacing,
+} from '@/constants/theme';
 import { validatePassword } from '@/lib/validation';
 import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
@@ -52,136 +59,143 @@ export default function ResetPassword() {
 
       if (updateError) throw updateError;
 
-      showAlert(
-        'Password Updated!',
-        'Your password has been successfully updated.',
-      );
+      showAlert('Password Updated!', 'Your password has been successfully updated.');
       router.replace('/(app)');
     } catch (e: any) {
       console.error('Password update error:', e);
-      showAlert(
-        'Update Failed',
-        e?.message || 'Could not update password. Please try again.',
-      );
+      showAlert('Update Failed', e?.message || 'Could not update password. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
-  const maxWidth = isDesktop ? 500 : isTablet ? 600 : '100%';
+  const maxWidth = isDesktop ? 520 : isTablet ? 580 : '100%';
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={[styles.wrap, { backgroundColor: colors.background }]}
-    >
-      <ThemeAccessButton />
+    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
+      <AuthHeader
+        icon={<Ionicons name="lock-open-outline" size={34} color="#ffffff" />}
+        title="Create New Password"
+        subtitle="Choose a strong password you have not used before"
+        onBack={() => router.back()}
+      />
 
-      <Animated.View style={[styles.content, { maxWidth, width: '100%' }, anim]}>
-        <AuthHeader
-          icon={<Ionicons name="lock-open-outline" size={34} color="#ffffff" />}
-          title="Create New Password"
-          subtitle="Enter your new password below"
-          onBack={() => router.back()}
+      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
+        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
+          <Ionicons name="shield-checkmark-outline" size={14} color={colors.primary} />
+          <Text style={[styles.badgeText, { color: colors.primary }]}>Security Update</Text>
+        </View>
+
+        <Text style={[styles.title, { color: colors.text }]}>Set your new password</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Use at least 8 characters with upper/lowercase letters and numbers.</Text>
+
+        <Input
+          label="New Password"
+          icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (errors.password) {
+              setErrors({ ...errors, password: undefined });
+            }
+          }}
+          placeholder="Min 8 characters"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.password}
+          editable={!loading}
         />
 
-        {/* Reset Form */}
-        <Card style={styles.card}>
-          <Input
-            label="New Password"
-            icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              if (errors.password) {
-                setErrors({ ...errors, password: undefined });
-              }
-            }}
-            placeholder="Min 8 characters"
-            secureTextEntry
-            showPasswordToggle
-            autoCapitalize="none"
-            autoComplete="password-new"
-            textContentType="newPassword"
-            error={errors.password}
-            editable={!loading}
-          />
+        <PasswordStrengthBar password={password} />
 
-          <PasswordStrengthBar password={password} />
+        <Input
+          label="Confirm New Password"
+          icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
+          value={confirmPassword}
+          onChangeText={(text) => {
+            setConfirmPassword(text);
+            if (errors.confirmPassword) {
+              setErrors({ ...errors, confirmPassword: undefined });
+            }
+          }}
+          placeholder="Re-enter your new password"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.confirmPassword}
+          editable={!loading}
+        />
 
-          <Input
-            label="Confirm New Password"
-            icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
-            value={confirmPassword}
-            onChangeText={(text) => {
-              setConfirmPassword(text);
-              if (errors.confirmPassword) {
-                setErrors({ ...errors, confirmPassword: undefined });
-              }
-            }}
-            placeholder="Re-enter your new password"
-            secureTextEntry
-            showPasswordToggle
-            autoCapitalize="none"
-            autoComplete="password-new"
-            textContentType="newPassword"
-            error={errors.confirmPassword}
-            editable={!loading}
-          />
+        <Button
+          title={loading ? 'Updating...' : 'Update Password'}
+          onPress={handleUpdatePassword}
+          disabled={loading}
+          loading={loading}
+          variant="gradient"
+          fullWidth
+          size="lg"
+          style={styles.primaryCta}
+        />
 
-          <Button
-            title={loading ? 'Updating...' : 'Update Password'}
-            onPress={handleUpdatePassword}
-            disabled={loading}
-            loading={loading}
-            variant="gradient"
-            fullWidth
-            size="lg"
-            style={{ marginTop: spacing.sm }}
-          />
-
-          <View style={styles.helperRow}>
-            <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
-            <Text
-              style={[
-                styles.helperText,
-                {
-                  color: colors.textSecondary,
-                  fontSize: fontSize.xs,
-                },
-              ]}
-            >
-              Password must be at least 8 characters with uppercase, lowercase, and a number
-            </Text>
-          </View>
-        </Card>
-      </Animated.View>
-    </KeyboardAvoidingView>
+        <View style={[styles.infoRow, { backgroundColor: colors.surfaceVariant }]}> 
+          <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
+          <Text style={[styles.infoText, { color: colors.textSecondary }]}>Updating your password signs out inactive sessions on some devices.</Text>
+        </View>
+      </Card>
+    </AuthScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
-    padding: spacing.lg,
-    alignItems: 'center',
-  },
   card: {
     width: '100%',
+    borderRadius: borderRadius.xl,
   },
-  helperRow: {
+  badge: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: spacing.xs,
-    marginTop: spacing.md,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    marginBottom: spacing.sm,
   },
-  helperText: {
-    textAlign: 'center',
+  badgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
+    textTransform: 'uppercase',
+  },
+  title: {
+    fontSize: fontSize.xl,
+    fontWeight: fontWeight.black,
+  },
+  subtitle: {
+    fontSize: fontSize.sm,
+    marginTop: 4,
+    marginBottom: spacing.md,
+    lineHeight: fontSize.sm * 1.35,
+  },
+  primaryCta: {
+    marginTop: spacing.sm,
+    borderRadius: borderRadius.full,
+  },
+  infoRow: {
+    marginTop: spacing.md,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  infoText: {
+    fontSize: fontSize.xs,
     flex: 1,
   },
 });

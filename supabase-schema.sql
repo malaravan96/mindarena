@@ -92,7 +92,9 @@ CREATE TABLE public.puzzles (
   date_key TEXT UNIQUE NOT NULL,
   title TEXT NOT NULL,
   prompt TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('logic', 'pattern', 'math', 'reasoning')),
+  type TEXT NOT NULL CHECK (
+    type IN ('logic', 'pattern', 'math', 'reasoning', 'word', 'memory', 'visual', 'spatial', 'trivia')
+  ),
   options TEXT[] NOT NULL,
   answer_index INTEGER NOT NULL CHECK (answer_index >= 0),
   difficulty TEXT DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
@@ -310,80 +312,150 @@ END $$;
 
 
 -- ============================================================
--- STEP 8: SEED DATA (7 days of puzzles)
+-- STEP 8: SEED DATA (current 14-day window)
 -- ============================================================
 
 INSERT INTO public.puzzles (date_key, title, prompt, type, options, answer_index, difficulty, points)
 VALUES
   (
-    '2026-02-10',
-    'Pattern Recognition',
-    'What comes next in the sequence? 3, 6, 12, 24, ?',
+    '2026-02-21',
+    'Growing Gaps',
+    'What comes next in the sequence? 2, 6, 12, 20, ?',
     'pattern',
-    ARRAY['27', '36', '48', '60'],
-    2,
-    'easy',
-    100
-  ),
-  (
-    '2026-02-11',
-    'Logic Challenge',
-    'If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops definitely Lazzies?',
-    'logic',
-    ARRAY['Yes', 'No', 'Cannot be determined', 'Only sometimes'],
-    0,
-    'medium',
-    100
-  ),
-  (
-    '2026-02-12',
-    'Quick Math',
-    'Solve: (15 x 4) - (20 / 5) = ?',
-    'math',
-    ARRAY['52', '56', '60', '64'],
+    ARRAY['28', '30', '32', '34'],
     1,
     'easy',
     100
   ),
   (
-    '2026-02-13',
-    'Number Sequence',
-    'What is the next number? 1, 1, 2, 3, 5, 8, ?',
-    'pattern',
-    ARRAY['10', '11', '13', '15'],
+    '2026-02-22',
+    'Set Logic',
+    'All Zorps are Kems. Some Kems are Dars. Can we conclude that some Zorps are Dars?',
+    'logic',
+    ARRAY['Yes', 'No', 'Cannot be determined', 'Only if all Kems are Zorps'],
     2,
     'medium',
-    150
+    120
   ),
   (
-    '2026-02-14',
-    'Deductive Reasoning',
-    'A is taller than B. C is shorter than B. D is taller than A. Who is the shortest?',
+    '2026-02-23',
+    'Mental Arithmetic',
+    'Solve: (18 / 3) + (7 * 4) = ?',
+    'math',
+    ARRAY['30', '32', '34', '36'],
+    2,
+    'easy',
+    100
+  ),
+  (
+    '2026-02-24',
+    'Word Sense',
+    'Choose the closest synonym for "scarce".',
+    'word',
+    ARRAY['Plentiful', 'Rare', 'Simple', 'Obvious'],
+    1,
+    'easy',
+    100
+  ),
+  (
+    '2026-02-25',
+    'Sequence Recall',
+    'You see this sequence once: 9, 1, 4, 7, 2. What was the 4th number?',
+    'memory',
+    ARRAY['1', '4', '7', '2'],
+    2,
+    'medium',
+    120
+  ),
+  (
+    '2026-02-26',
+    'Odd Shape',
+    'Which option is not a polygon?',
+    'visual',
+    ARRAY['Triangle', 'Square', 'Pentagon', 'Circle'],
+    3,
+    'easy',
+    100
+  ),
+  (
+    '2026-02-27',
+    'Direction Turn',
+    'An arrow points north. Rotate it 90 degrees clockwise. Where does it point?',
+    'spatial',
+    ARRAY['North', 'East', 'South', 'West'],
+    1,
+    'easy',
+    100
+  ),
+  (
+    '2026-02-28',
+    'Brain Fact',
+    'Which brain structure is most associated with forming new memories?',
+    'trivia',
+    ARRAY['Cerebellum', 'Hippocampus', 'Medulla', 'Occipital lobe'],
+    1,
+    'medium',
+    120
+  ),
+  (
+    '2026-03-01',
+    'Conditional Reasoning',
+    'Every pilot is trained. No untrained person can fly. Can an untrained person be a pilot?',
+    'reasoning',
+    ARRAY['Yes', 'No', 'Only in emergencies', 'Cannot be determined'],
+    1,
+    'medium',
+    130
+  ),
+  (
+    '2026-03-02',
+    'Square Pattern',
+    'Find the next number: 1, 4, 9, 16, ?',
+    'pattern',
+    ARRAY['20', '24', '25', '27'],
+    2,
+    'easy',
+    100
+  ),
+  (
+    '2026-03-03',
+    'Order Logic',
+    'If A is taller than B, B is taller than C, and C is taller than D, who is tallest?',
     'logic',
     ARRAY['A', 'B', 'C', 'D'],
-    2,
-    'medium',
-    150
+    0,
+    'easy',
+    100
   ),
   (
-    '2026-02-15',
-    'Arithmetic',
-    'If x + 7 = 15 and y = 2x, what is y?',
+    '2026-03-04',
+    'Percent Quickie',
+    'What is 40% of 90?',
     'math',
-    ARRAY['14', '16', '18', '20'],
+    ARRAY['32', '34', '36', '38'],
+    2,
+    'easy',
+    100
+  ),
+  (
+    '2026-03-05',
+    'Analogy',
+    'Book is to reading as fork is to ____.',
+    'word',
+    ARRAY['writing', 'eating', 'drawing', 'sleeping'],
     1,
     'easy',
     100
   ),
   (
-    '2026-02-16',
-    'Pattern Match',
-    'Complete the pattern: AB, CD, EF, ?',
-    'pattern',
-    ARRAY['FG', 'GH', 'HI', 'IJ'],
+    '2026-03-06',
+    'Color Recall',
+    'Remember this order: Blue, Red, Green, Blue, Yellow. Which color came right after Green?',
+    'memory',
+    ARRAY['Red', 'Blue', 'Yellow', 'Green'],
     1,
-    'easy',
-    100
+    'medium',
+    120
   );
 
 
