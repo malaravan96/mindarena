@@ -7,11 +7,14 @@ import {
   ActivityIndicator,
   ScrollView,
   AppState,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
+import { Audio } from 'expo-av';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { getItem, setItem } from '@/lib/storage';
@@ -50,10 +53,28 @@ type PendingInvite = {
   fromName: string;
 };
 
+type ChatMessageType = 'text' | 'emoji' | 'voice';
+
+type PvpChatMessage = {
+  id: string;
+  match_id: string;
+  sender_id: string;
+  sender_name: string;
+  message_type: ChatMessageType;
+  text_content: string | null;
+  emoji: string | null;
+  voice_url: string | null;
+  voice_duration_ms: number | null;
+  created_at: string;
+};
+
 const STATS_KEY = 'pvp-stats';
 const COUNTDOWN_SECS = 3;
 const FOUND_DELAY_MS = 1500;
 const INVITE_TIMEOUT_MS = 30_000;
+const CHAT_TEXT_LIMIT = 160;
+const CHAT_VOICE_BUCKET = 'pvp-voice';
+const QUICK_REACTIONS = ['🔥', '😂', '👏', '😮', '😈'];
 
 // ── Component ───────────────────────────────────────────────────────
 
@@ -95,13 +116,27 @@ export default function PvpScreen() {
   const [oppReveal, setOppReveal] = useState<{ selectedIndex: number; isCorrect: boolean; msTaken: number } | null>(null);
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
 
+  // Chat + voice state
+  const [chatMessages, setChatMessages] = useState<PvpChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [reactionToast, setReactionToast] = useState<{ emoji: string; fromName: string } | null>(null);
+
   // Refs for channels and timers
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
   const inviteChannelRef = useRef<RealtimeChannel | null>(null);
   const matchChannelRef = useRef<RealtimeChannel | null>(null);
+  const chatChannelRef = useRef<RealtimeChannel | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactionToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const voicePlaybackRef = useRef<Audio.Sound | null>(null);
   const phaseRef = useRef<Phase>('lobby');
   const mySubmittedRef = useRef(false);
   const oppSubmittedRef = useRef(false);
@@ -111,12 +146,14 @@ export default function PvpScreen() {
   const matchIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);
   const statsRef = useRef<PvpStats>({ wins: 0, losses: 0, draws: 0 });
+  const chatOpenRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { matchIdRef.current = matchId; }, [matchId]);
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { statsRef.current = stats; }, [stats]);
+  useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
 
   // ── Init: load user, stats, players, presence ───────────────────
 
@@ -159,6 +196,28 @@ export default function PvpScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!matchId || !userId) {
+      closeChatSubscription();
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      await beginMatchMessaging(matchId);
+      if (cancelled) closeChatSubscription();
+    })();
+
+    return () => {
+      cancelled = true;
+      closeChatSubscription();
+    };
+  }, [matchId, userId]);
+
+  useEffect(() => {
+    if (chatOpen) setChatUnread(0);
+  }, [chatOpen]);
+
   // ── Data Loading ────────────────────────────────────────────────
 
   async function loadStats() {
@@ -198,6 +257,275 @@ export default function PvpScreen() {
       }
     } catch { /* ignore */ }
     setLoadingPlayers(false);
+  }
+
+  async function unloadVoicePlayback() {
+    if (!voicePlaybackRef.current) return;
+    try {
+      await voicePlaybackRef.current.unloadAsync();
+    } catch {
+      // ignore
+    }
+    voicePlaybackRef.current = null;
+    setPlayingVoiceId(null);
+  }
+
+  async function stopVoiceRecordingSilently() {
+    if (!recordingRef.current) return;
+    try {
+      await recordingRef.current.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+    } catch {
+      // ignore
+    }
+    recordingRef.current = null;
+    setIsRecordingVoice(false);
+    setChatBusy(false);
+  }
+
+  function clearReactionToast() {
+    if (reactionToastTimeoutRef.current) {
+      clearTimeout(reactionToastTimeoutRef.current);
+      reactionToastTimeoutRef.current = null;
+    }
+    setReactionToast(null);
+  }
+
+  function resetChatState() {
+    setChatMessages([]);
+    setChatInput('');
+    setChatUnread(0);
+    setChatBusy(false);
+    setChatOpen(false);
+    clearReactionToast();
+  }
+
+  function closeChatSubscription() {
+    if (chatChannelRef.current) {
+      supabase.removeChannel(chatChannelRef.current);
+      chatChannelRef.current = null;
+    }
+  }
+
+  async function loadChatHistory(mId: string) {
+    const { data, error } = await supabase
+      .from('pvp_messages')
+      .select('id, match_id, sender_id, sender_name, message_type, text_content, emoji, voice_url, voice_duration_ms, created_at')
+      .eq('match_id', mId)
+      .order('created_at', { ascending: true })
+      .limit(120);
+
+    if (!error && data) {
+      setChatMessages((prev) => {
+        const byId = new Map(prev.map((item) => [item.id, item]));
+        for (const item of data as PvpChatMessage[]) byId.set(item.id, item);
+        return Array.from(byId.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      });
+    }
+  }
+
+  function handleIncomingMessage(row: PvpChatMessage) {
+    setChatMessages((prev) => {
+      if (prev.some((item) => item.id === row.id)) return prev;
+      const next = [...prev, row];
+      next.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      return next;
+    });
+
+    const fromOpponent = row.sender_id !== userIdRef.current;
+    if (!fromOpponent) return;
+
+    if (!chatOpenRef.current) {
+      setChatUnread((prev) => prev + 1);
+    }
+
+    if (row.message_type === 'emoji' && row.emoji) {
+      setReactionToast({ emoji: row.emoji, fromName: row.sender_name || 'Opponent' });
+      if (reactionToastTimeoutRef.current) clearTimeout(reactionToastTimeoutRef.current);
+      reactionToastTimeoutRef.current = setTimeout(() => setReactionToast(null), 1600);
+    }
+  }
+
+  function subscribeChatMessages(mId: string) {
+    closeChatSubscription();
+
+    const channel = supabase
+      .channel(`pvp-chat-${mId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'pvp_messages',
+          filter: `match_id=eq.${mId}`,
+        },
+        ({ new: newRow }) => {
+          handleIncomingMessage(newRow as PvpChatMessage);
+        },
+      )
+      .subscribe();
+
+    chatChannelRef.current = channel;
+  }
+
+  async function beginMatchMessaging(mId: string) {
+    setChatUnread(0);
+    subscribeChatMessages(mId);
+    await loadChatHistory(mId);
+  }
+
+  async function persistChatMessage(payload: {
+    message_type: ChatMessageType;
+    text_content?: string | null;
+    emoji?: string | null;
+    voice_url?: string | null;
+    voice_duration_ms?: number | null;
+  }) {
+    if (!matchIdRef.current || !userIdRef.current) return;
+
+    const row = {
+      match_id: matchIdRef.current,
+      sender_id: userIdRef.current,
+      sender_name: username,
+      message_type: payload.message_type,
+      text_content: payload.text_content ?? null,
+      emoji: payload.emoji ?? null,
+      voice_url: payload.voice_url ?? null,
+      voice_duration_ms: payload.voice_duration_ms ?? null,
+    };
+
+    const { error } = await supabase.from('pvp_messages').insert(row);
+    if (error) throw error;
+  }
+
+  async function sendChatText() {
+    const text = chatInput.trim();
+    if (!text || chatBusy || !matchId || !userId) return;
+
+    setChatBusy(true);
+    try {
+      await persistChatMessage({
+        message_type: 'text',
+        text_content: text.slice(0, CHAT_TEXT_LIMIT),
+      });
+      setChatInput('');
+    } catch {
+      // ignore when table/policies are not ready
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function sendEmojiReaction(emoji: string) {
+    if (chatBusy || !matchId || !userId) return;
+    setChatBusy(true);
+    try {
+      await persistChatMessage({
+        message_type: 'emoji',
+        emoji,
+      });
+    } catch {
+      // ignore when table/policies are not ready
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function startVoiceRecording() {
+    if (Platform.OS === 'web' || isRecordingVoice || chatBusy || !matchId || !userId) return;
+
+    setChatBusy(true);
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) return;
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+      });
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecordingVoice(true);
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function stopVoiceRecordingAndSend() {
+    if (!recordingRef.current || !matchId || !userId) return;
+
+    setChatBusy(true);
+    let localUri: string | null = null;
+    let durationMs = 0;
+
+    try {
+      const recording = recordingRef.current;
+      await recording.stopAndUnloadAsync();
+      const status = await recording.getStatusAsync();
+      durationMs = status.durationMillis ?? 0;
+      localUri = recording.getURI();
+
+      recordingRef.current = null;
+      setIsRecordingVoice(false);
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+
+      if (!localUri) return;
+
+      const response = await fetch(localUri);
+      const blob = await response.blob();
+      const arrayBuffer = await new Response(blob).arrayBuffer();
+      const ext = blob.type?.includes('webm') ? 'webm' : 'm4a';
+      const filePath = `${matchId}/${userId}/${Date.now()}-${Crypto.randomUUID()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(CHAT_VOICE_BUCKET)
+        .upload(filePath, arrayBuffer, {
+          contentType: blob.type || 'audio/m4a',
+          upsert: false,
+        });
+
+      if (uploadError) return;
+
+      const { data: urlData } = supabase.storage.from(CHAT_VOICE_BUCKET).getPublicUrl(filePath);
+      await persistChatMessage({
+        message_type: 'voice',
+        voice_url: urlData.publicUrl,
+        voice_duration_ms: durationMs,
+      });
+    } catch {
+      // ignore when bucket/policies are not ready
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function playVoiceMessage(message: PvpChatMessage) {
+    if (!message.voice_url || !message.id) return;
+
+    await unloadVoicePlayback();
+
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: message.voice_url },
+        { shouldPlay: true },
+      );
+      voicePlaybackRef.current = sound;
+      setPlayingVoiceId(message.id);
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded || status.didJustFinish) {
+          setPlayingVoiceId(null);
+          sound.unloadAsync().catch(() => null);
+          if (voicePlaybackRef.current === sound) voicePlaybackRef.current = null;
+        }
+      });
+    } catch {
+      setPlayingVoiceId(null);
+    }
   }
 
   // ── Lobby Presence Channel ──────────────────────────────────────
@@ -269,6 +597,10 @@ export default function PvpScreen() {
       supabase.removeChannel(matchChannelRef.current);
       matchChannelRef.current = null;
     }
+    closeChatSubscription();
+    void stopVoiceRecordingSilently();
+    void unloadVoicePlayback();
+    clearReactionToast();
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
     if (inviteTimeoutRef.current) { clearTimeout(inviteTimeoutRef.current); inviteTimeoutRef.current = null; }
@@ -293,6 +625,7 @@ export default function PvpScreen() {
 
   function resetToLobby() {
     cleanupMatch();
+    resetChatState();
     setPhase('lobby');
     setMatchId(null);
     setOpponentName('Opponent');
@@ -316,6 +649,7 @@ export default function PvpScreen() {
   function sendInvite(player: PlayerInfo) {
     if (!userId) return;
 
+    resetChatState();
     const puzzleIndex = Math.floor(Math.random() * offlinePuzzles.length);
     const newMatchId = Crypto.randomUUID();
 
@@ -398,6 +732,7 @@ export default function PvpScreen() {
   function acceptInvite() {
     if (!pendingInvite || !userId) return;
 
+    resetChatState();
     const { matchId: mId, puzzleIndex, fromId, fromName } = pendingInvite;
     setMatchId(mId);
     setOpponentName(fromName);
@@ -630,6 +965,7 @@ export default function PvpScreen() {
 
   const getInitials = (name: string) => name.slice(0, 2).toUpperCase();
   const formatTime = (ms: number) => (ms / 1000).toFixed(1) + 's';
+  const formatVoiceDuration = (ms: number | null) => `${Math.max(1, Math.round((ms ?? 0) / 1000))}s`;
 
   // Merge online status into player list
   const playerList = players
@@ -641,6 +977,8 @@ export default function PvpScreen() {
   const onlineCount = playerList.filter((p) => p.online).length;
   const totalMatches = stats.wins + stats.losses + stats.draws;
   const winRate = totalMatches > 0 ? Math.round((stats.wins / totalMatches) * 100) : 0;
+  const matchHasChat = phase !== 'lobby' && !!matchId;
+  const unreadLabel = chatUnread > 99 ? '99+' : `${chatUnread}`;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -654,9 +992,24 @@ export default function PvpScreen() {
           <Text style={[styles.appTitle, { color: colors.text }]}>Battle Arena</Text>
           <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Real-time 1v1 puzzle duels</Text>
         </View>
-        <View style={[styles.headerBadge, { backgroundColor: `${colors.primary}18` }]}>
-          <Ionicons name="radio-outline" size={14} color={colors.primary} />
-          <Text style={[styles.headerBadgeText, { color: colors.primary }]}>Live</Text>
+        <View style={styles.headerActions}>
+          <View style={[styles.headerBadge, { backgroundColor: `${colors.primary}18` }]}>
+            <Ionicons name="radio-outline" size={14} color={colors.primary} />
+            <Text style={[styles.headerBadgeText, { color: colors.primary }]}>Live</Text>
+          </View>
+          {matchHasChat && (
+            <Pressable
+              onPress={() => setChatOpen((prev) => !prev)}
+              style={[styles.chatToggleBtn, { borderColor: `${colors.primary}35`, backgroundColor: `${colors.primary}10` }]}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
+              {chatUnread > 0 && (
+                <View style={[styles.unreadBadge, { backgroundColor: colors.wrong }]}>
+                  <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
+                </View>
+              )}
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -1064,6 +1417,165 @@ export default function PvpScreen() {
           </>
         )}
 
+        {matchHasChat && (
+          <Card style={styles.card} padding="md">
+            <Pressable
+              onPress={() => setChatOpen((prev) => !prev)}
+              style={styles.chatHeaderRow}
+            >
+              <View style={styles.chatHeaderTitleRow}>
+                <Ionicons name="chatbox-ellipses-outline" size={16} color={colors.text} />
+                <Text style={[styles.chatTitle, { color: colors.text }]}>Match Chat</Text>
+              </View>
+              <View style={styles.chatHeaderRight}>
+                {chatUnread > 0 && !chatOpen && (
+                  <View style={[styles.unreadBadge, { backgroundColor: colors.wrong }]}>
+                    <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
+                  </View>
+                )}
+                <Ionicons name={chatOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textSecondary} />
+              </View>
+            </Pressable>
+
+            {reactionToast && (
+              <View style={[styles.reactionToast, { backgroundColor: `${colors.primary}16`, borderColor: `${colors.primary}30` }]}>
+                <Text style={styles.reactionToastEmoji}>{reactionToast.emoji}</Text>
+                <Text style={[styles.reactionToastText, { color: colors.text }]}>
+                  {reactionToast.fromName} reacted
+                </Text>
+              </View>
+            )}
+
+            {chatOpen && (
+              <>
+                <View style={styles.reactionRow}>
+                  {QUICK_REACTIONS.map((emoji) => (
+                    <Pressable
+                      key={emoji}
+                      onPress={() => sendEmojiReaction(emoji)}
+                      disabled={chatBusy}
+                      style={[styles.reactionBtn, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+                    >
+                      <Text style={styles.reactionBtnText}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <ScrollView style={styles.chatLog} contentContainerStyle={styles.chatLogContent} nestedScrollEnabled>
+                  {chatMessages.length === 0 ? (
+                    <Text style={[styles.emptyChatText, { color: colors.textSecondary }]}>
+                      No messages yet. Send a reaction, text, or voice clip.
+                    </Text>
+                  ) : (
+                    chatMessages.map((msg) => {
+                      const mine = msg.sender_id === userId;
+                      const bubbleColor = mine ? `${colors.primary}18` : colors.surfaceVariant;
+                      const bubbleBorder = mine ? `${colors.primary}35` : colors.border;
+                      return (
+                        <View
+                          key={msg.id}
+                          style={[styles.chatMessageRow, { alignItems: mine ? 'flex-end' : 'flex-start' }]}
+                        >
+                          <Text style={[styles.chatSender, { color: colors.textSecondary }]}>
+                            {mine ? 'You' : msg.sender_name || opponentName}
+                          </Text>
+                          <View style={[styles.chatBubble, { backgroundColor: bubbleColor, borderColor: bubbleBorder }]}>
+                            {msg.message_type === 'text' && !!msg.text_content && (
+                              <Text style={[styles.chatMessageText, { color: colors.text }]}>{msg.text_content}</Text>
+                            )}
+                            {msg.message_type === 'emoji' && !!msg.emoji && (
+                              <Text style={styles.chatEmojiOnly}>{msg.emoji}</Text>
+                            )}
+                            {msg.message_type === 'voice' && (
+                              <Pressable
+                                onPress={() => playVoiceMessage(msg)}
+                                style={[styles.voiceBubbleBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                              >
+                                <Ionicons
+                                  name={playingVoiceId === msg.id ? 'pause-circle' : 'play-circle'}
+                                  size={18}
+                                  color={colors.primary}
+                                />
+                                <Text style={[styles.voiceBubbleText, { color: colors.text }]}>
+                                  Voice {formatVoiceDuration(msg.voice_duration_ms)}
+                                </Text>
+                              </Pressable>
+                            )}
+                          </View>
+                          <Text style={[styles.chatTime, { color: colors.textTertiary }]}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </ScrollView>
+
+                <View style={styles.chatComposerRow}>
+                  <TextInput
+                    value={chatInput}
+                    onChangeText={setChatInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor={colors.textTertiary}
+                    maxLength={CHAT_TEXT_LIMIT}
+                    editable={!chatBusy}
+                    returnKeyType="send"
+                    onSubmitEditing={sendChatText}
+                    style={[
+                      styles.chatInput,
+                      { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant },
+                    ]}
+                  />
+                  <Pressable
+                    onPress={sendChatText}
+                    disabled={chatBusy || !chatInput.trim()}
+                    style={[
+                      styles.chatSendBtn,
+                      {
+                        backgroundColor: chatBusy || !chatInput.trim() ? colors.border : colors.primary,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="send" size={15} color="#fff" />
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPressIn={startVoiceRecording}
+                  onPressOut={stopVoiceRecordingAndSend}
+                  disabled={chatBusy || Platform.OS === 'web'}
+                  style={[
+                    styles.holdToTalkBtn,
+                    {
+                      borderColor: isRecordingVoice ? colors.correct : colors.border,
+                      backgroundColor: isRecordingVoice ? `${colors.correct}14` : colors.surfaceVariant,
+                      opacity: Platform.OS === 'web' ? 0.55 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={isRecordingVoice ? 'mic' : 'mic-outline'}
+                    size={17}
+                    color={isRecordingVoice ? colors.correct : colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.holdToTalkText,
+                      { color: isRecordingVoice ? colors.correct : colors.textSecondary },
+                    ]}
+                  >
+                    {Platform.OS === 'web'
+                      ? 'Voice chat works on Android/iOS app'
+                      : isRecordingVoice
+                        ? 'Recording... release to send'
+                        : 'Hold to talk'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </Card>
+        )}
+
         <View style={{ height: spacing.xl }} />
       </ScrollView>
     </SafeAreaView>
@@ -1102,6 +1614,7 @@ const styles = StyleSheet.create({
   headerTitleWrap: { flex: 1 },
   appTitle: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
   headerSubtitle: { fontSize: fontSize.sm, marginTop: 2 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1111,6 +1624,26 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   headerBadgeText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  chatToggleBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    top: -7,
+    right: -8,
+  },
+  unreadBadgeText: { color: '#fff', fontSize: 10, fontWeight: fontWeight.bold },
 
   inviteBanner: {
     marginHorizontal: spacing.md,
@@ -1384,4 +1917,88 @@ const styles = StyleSheet.create({
   compTime: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   vsBadgeSmall: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   vsTextSmall: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
+
+  chatHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  chatHeaderTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  chatTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
+  chatHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 20, paddingRight: spacing.xs },
+  reactionToast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  reactionToastEmoji: { fontSize: fontSize.lg },
+  reactionToastText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
+  reactionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  reactionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reactionBtnText: { fontSize: fontSize.lg },
+  chatLog: { maxHeight: 230, marginBottom: spacing.sm },
+  chatLogContent: { gap: spacing.sm, paddingVertical: spacing.xs },
+  emptyChatText: { fontSize: fontSize.sm, textAlign: 'center', paddingVertical: spacing.md },
+  chatMessageRow: { gap: 4 },
+  chatSender: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
+  chatBubble: {
+    maxWidth: '88%',
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  chatMessageText: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.5 },
+  chatEmojiOnly: { fontSize: 28, lineHeight: 34 },
+  voiceBubbleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  voiceBubbleText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
+  chatTime: { fontSize: fontSize.xs },
+  chatComposerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  chatInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.sm,
+  },
+  chatSendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  holdToTalkBtn: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  holdToTalkText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
 });
