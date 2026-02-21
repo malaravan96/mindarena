@@ -107,6 +107,7 @@ export default function AppLayout() {
         name="chat-thread"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
         }}
       />
     </Tabs>
