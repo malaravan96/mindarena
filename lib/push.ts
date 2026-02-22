@@ -23,6 +23,16 @@ export async function registerForPushNotifications() {
   }
   if (finalStatus !== 'granted') return null;
 
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#2563eb',
+      sound: 'default',
+    });
+  }
+
   const projectId =
     Constants?.expoConfig?.extra?.eas?.projectId ??
     Constants?.easConfig?.projectId;
@@ -60,9 +70,10 @@ export async function upsertCurrentUserPushToken() {
 
 export async function notifyDmMessage(messageId: string) {
   if (!messageId) return;
-  await supabase.functions.invoke('notify-dm-message', {
+  const { error } = await supabase.functions.invoke('notify-dm-message', {
     body: { message_id: messageId },
   });
+  if (error) throw error;
 }
 
 export async function notifyIncomingMatchCall(matchId: string, calleeId: string, callerName: string) {

@@ -69,6 +69,9 @@ Deno.serve(async (req) => {
       .maybeSingle<{ username: string | null; display_name: string | null }>();
 
     const senderName = senderProfile?.display_name || senderProfile?.username || 'New message';
+    const previewBody = message.body.startsWith('e2ee:v1:')
+      ? 'Sent you an encrypted message'
+      : message.body.slice(0, 120);
 
     const { data: tokens } = await supabase
       .from('user_push_tokens')
@@ -83,20 +86,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    await sendExpoPush(
-      pushTokens.map((token) => ({
-        to: token,
-        title: senderName,
-        body: message.body.slice(0, 120),
-        sound: 'default',
-        priority: 'high',
-        data: {
-          type: 'dm',
-          conversation_id: message.conversation_id,
-          message_id: message.id,
-        },
-      })),
-    );
+    try {
+      await sendExpoPush(
+        pushTokens.map((token) => ({
+          to: token,
+          title: senderName,
+          body: previewBody,
+          sound: 'default',
+          priority: 'high',
+          data: {
+            type: 'dm',
+            conversation_id: message.conversation_id,
+            message_id: message.id,
+          },
+        })),
+      );
+    } catch (pushError) {
+      console.error('notify-dm-message push send failed', pushError);
+      return new Response(JSON.stringify({ ok: false, sent: 0, reason: 'push-send-failed' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     return new Response(JSON.stringify({ ok: true, sent: pushTokens.length }), {
       status: 200,

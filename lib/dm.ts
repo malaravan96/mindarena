@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { DmConversation, DmMessage, Profile } from '@/lib/types';
+import { decryptDmMessageBody, encryptDmMessageBody, ensureDmE2eeReady, isEncryptedEnvelope } from '@/lib/dmE2ee';
 
 type ConversationRow = {
   id: string;
@@ -72,6 +73,13 @@ export async function getOrCreateConversation(peerUserId: string) {
 }
 
 export async function listConversations(userId: string): Promise<DmConversation[]> {
+  let e2eeReady = true;
+  try {
+    await ensureDmE2eeReady(userId);
+  } catch {
+    e2eeReady = false;
+  }
+
   const { data: rows, error } = await supabase
     .from('dm_conversations')
     .select('id, user_a, user_b, created_at, last_message_at')
@@ -133,21 +141,53 @@ export async function listConversations(userId: string): Promise<DmConversation[
     }
   }
 
-  return conversations.map((c) => {
-    const peerId = c.user_a === userId ? c.user_b : c.user_a;
-    const peer = profileById.get(peerId);
-    return {
-      ...c,
-      peer_id: peerId,
-      peer_name: peer?.name ?? 'Player',
-      peer_avatar_url: peer?.avatar_url ?? null,
-      last_message: lastByConversation.get(c.id)?.body ?? '',
-      unread_count: unreadByConversation.get(c.id) ?? 0,
-    };
-  });
+  const output = await Promise.all(
+    conversations.map(async (c) => {
+      const peerId = c.user_a === userId ? c.user_b : c.user_a;
+      const peer = profileById.get(peerId);
+      const lastRaw = lastByConversation.get(c.id)?.body ?? '';
+      let lastMessage = isEncryptedEnvelope(lastRaw) ? '[Encrypted message]' : lastRaw;
+
+      if (lastRaw && e2eeReady) {
+        try {
+          lastMessage = await decryptDmMessageBody({
+            conversationId: c.id,
+            userId,
+            peerId,
+            body: lastRaw,
+          });
+        } catch {
+          lastMessage = '[Encrypted message]';
+        }
+      }
+
+      return {
+        ...c,
+        peer_id: peerId,
+        peer_name: peer?.name ?? 'Player',
+        peer_avatar_url: peer?.avatar_url ?? null,
+        last_message: lastMessage,
+        unread_count: unreadByConversation.get(c.id) ?? 0,
+      };
+    }),
+  );
+
+  return output;
 }
 
-export async function listMessages(conversationId: string): Promise<DmMessage[]> {
+export async function listMessages(
+  conversationId: string,
+  options?: { userId?: string; peerId?: string },
+): Promise<DmMessage[]> {
+  const uid = options?.userId ?? (await getCurrentUserId());
+  if (!uid) return [];
+  let e2eeReady = true;
+  try {
+    await ensureDmE2eeReady(uid);
+  } catch {
+    e2eeReady = false;
+  }
+
   const { data, error } = await supabase
     .from('dm_messages')
     .select('id, conversation_id, sender_id, body, created_at')
@@ -156,19 +196,72 @@ export async function listMessages(conversationId: string): Promise<DmMessage[]>
     .limit(400);
 
   if (error || !data) return [];
-  return data as DmMessage[];
+  const rows = data as DmMessage[];
+
+  let peerId = options?.peerId ?? null;
+  if (!peerId) {
+    const { data: conversation } = await supabase
+      .from('dm_conversations')
+      .select('user_a, user_b')
+      .eq('id', conversationId)
+      .maybeSingle<{ user_a: string; user_b: string }>();
+    if (conversation) {
+      peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
+    }
+  }
+
+  if (!peerId || !e2eeReady) {
+    return rows.map((row) => ({
+      ...row,
+      body: isEncryptedEnvelope(row.body) ? '[Encrypted message]' : row.body,
+    }));
+  }
+
+  const decrypted = await Promise.all(
+    rows.map(async (row) => {
+      try {
+        const body = await decryptDmMessageBody({
+          conversationId,
+          userId: uid,
+          peerId: peerId!,
+          body: row.body,
+        });
+        return { ...row, body };
+      } catch {
+        return { ...row, body: '[Unable to decrypt message]' };
+      }
+    }),
+  );
+
+  return decrypted;
 }
 
 export async function sendMessage(conversationId: string, body: string) {
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
+  await ensureDmE2eeReady(uid);
 
   const text = body.trim();
   if (!text) throw new Error('Message cannot be empty');
 
+  const { data: conversation } = await supabase
+    .from('dm_conversations')
+    .select('user_a, user_b')
+    .eq('id', conversationId)
+    .maybeSingle<{ user_a: string; user_b: string }>();
+  if (!conversation) throw new Error('Conversation not found');
+
+  const peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
+  const encryptedBody = await encryptDmMessageBody({
+    conversationId,
+    userId: uid,
+    peerId,
+    body: text,
+  });
+
   const { data, error } = await supabase
     .from('dm_messages')
-    .insert({ conversation_id: conversationId, sender_id: uid, body: text })
+    .insert({ conversation_id: conversationId, sender_id: uid, body: encryptedBody })
     .select('id, conversation_id, sender_id, body, created_at')
     .maybeSingle<DmMessage>();
 
@@ -179,7 +272,10 @@ export async function sendMessage(conversationId: string, body: string) {
     .update({ last_message_at: data.created_at })
     .eq('id', conversationId);
 
-  return data;
+  return {
+    ...data,
+    body: text,
+  };
 }
 
 export async function markConversationRead(conversationId: string) {

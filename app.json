@@ -21,12 +21,14 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
+        "NSCameraUsageDescription": "MindArena uses your camera for live video calls.",
         "NSMicrophoneUsageDescription": "MindArena uses your microphone for live match voice calls."
       },
       "bitcode": false
     },
     "android": {
       "package": "com.mindarena.app",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "RECORD_AUDIO",
         "POST_NOTIFICATIONS",

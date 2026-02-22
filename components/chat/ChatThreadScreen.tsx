@@ -1,6 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Image, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  ActivityIndicator,
+  Image,
+  Platform,
+  KeyboardAvoidingView,
+  FlatList,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,21 +21,37 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, listMessages, markConversationRead, sendMessage } from '@/lib/dm';
+import {
+  decryptDmCallPayload,
+  decryptDmMessageBody,
+  encryptDmCallPayload,
+  ensureDmE2eeReady,
+  isEncryptedEnvelope,
+} from '@/lib/dmE2ee';
 import { notifyDmMessage } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
+import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import type { CallUiState, DmMessage } from '@/lib/types';
+import { RtcVideoView } from '@/components/chat/RtcVideoView';
 
 type CallMode = 'audio' | 'video';
 type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
 
 const OUTGOING_CALL_TIMEOUT_MS = 30_000;
+const VIDEO_STAGE_HEIGHT = 220;
+
+function getStreamUrl(stream: any | null) {
+  if (!stream || typeof stream.toURL !== 'function') return null;
+  return stream.toURL();
+}
 
 export function ChatThreadScreen() {
   const router = useRouter();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('Player');
@@ -39,11 +68,17 @@ export function ChatThreadScreen() {
   const [callState, setCallState] = useState<CallUiState>('off');
   const [callMuted, setCallMuted] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [speakerOn, setSpeakerOn] = useState(false);
   const [opponentMuted, setOpponentMuted] = useState(false);
+  const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
+  const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
+  const [composerHeight, setComposerHeight] = useState(56);
 
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const callRef = useRef<DmWebRTCCall | null>(null);
   const callInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageListRef = useRef<FlatList<DmMessage> | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const userIdRef = useRef<string | null>(null);
   const peerIdRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
@@ -56,6 +91,20 @@ export function ChatThreadScreen() {
     () => [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [messages],
   );
+
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    const timer = setTimeout(() => {
+      messageListRef.current?.scrollToEnd({ animated: true });
+    }, 30);
+    return () => clearTimeout(timer);
+  }, [sortedMessages.length]);
+
+  const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    shouldAutoScrollRef.current = distanceFromBottom < 120;
+  }, []);
 
   const clearOutgoingTimer = useCallback(() => {
     if (!callInviteTimeoutRef.current) return;
@@ -79,13 +128,74 @@ export function ChatThreadScreen() {
     return list;
   }, []);
 
-  const sendCallSignal = useCallback((event: string, payload: Record<string, unknown>) => {
-    callChannelRef.current?.send({
-      type: 'broadcast',
-      event,
-      payload,
-    });
+  const resolveSignalPeerId = useCallback((payload: Record<string, unknown>) => {
+    const uid = userIdRef.current;
+    const fromId = typeof payload.fromId === 'string' ? payload.fromId : null;
+    const toId = typeof payload.toId === 'string' ? payload.toId : null;
+    if (uid && fromId && toId) {
+      return fromId === uid ? toId : fromId;
+    }
+    return peerIdRef.current;
   }, []);
+
+  const sendCallSignal = useCallback(async (event: string, payload: Record<string, unknown>) => {
+    const channel = callChannelRef.current;
+    const uid = userIdRef.current;
+    const convId = conversationIdRef.current;
+    const resolvedPeerId = resolveSignalPeerId(payload);
+    if (!channel || !uid || !convId || !resolvedPeerId) return false;
+
+    try {
+      const envelope = await encryptDmCallPayload({
+        conversationId: convId,
+        userId: uid,
+        peerId: resolvedPeerId,
+        payload,
+      });
+      await channel.send({
+        type: 'broadcast',
+        event,
+        payload: {
+          conversationId: convId,
+          fromId: typeof payload.fromId === 'string' ? payload.fromId : uid,
+          toId: typeof payload.toId === 'string' ? payload.toId : resolvedPeerId,
+          enc: envelope,
+          v: 1,
+        },
+      });
+      return true;
+    } catch (error) {
+      console.warn('Failed to send encrypted call signal', error);
+      return false;
+    }
+  }, [resolveSignalPeerId]);
+
+  const decodeCallSignalPayload = useCallback(
+    async (payload: Record<string, unknown>) => {
+      if (typeof payload.enc !== 'string') return payload;
+
+      const uid = userIdRef.current;
+      const convId =
+        typeof payload.conversationId === 'string'
+          ? payload.conversationId
+          : conversationIdRef.current;
+      const resolvedPeerId = resolveSignalPeerId(payload);
+      if (!uid || !convId || !resolvedPeerId) return null;
+
+      try {
+        const decrypted = await decryptDmCallPayload({
+          conversationId: convId,
+          userId: uid,
+          peerId: resolvedPeerId,
+          envelope: payload.enc,
+        });
+        return { ...payload, ...decrypted };
+      } catch {
+        return null;
+      }
+    },
+    [resolveSignalPeerId],
+  );
 
   const endCall = useCallback(
     async (sendEndedSignal: boolean) => {
@@ -96,6 +206,10 @@ export function ChatThreadScreen() {
       setCallMuted(false);
       setOpponentMuted(false);
       setCameraEnabled(true);
+      setSpeakerOn(false);
+      setLocalStreamUrl(null);
+      setRemoteStreamUrl(null);
+      await stopCallAudio().catch(() => null);
 
       const active = callRef.current;
       callRef.current = null;
@@ -121,7 +235,7 @@ export function ChatThreadScreen() {
         mediaMode: mode,
         iceServers: buildIceServers(),
         sendSignal: (event, payload) => {
-          sendCallSignal(event, {
+          void sendCallSignal(event, {
             ...payload,
             toId: peerIdRef.current,
           });
@@ -131,7 +245,20 @@ export function ChatThreadScreen() {
             setCallState(state);
             if (state === 'off') {
               setOutgoingMode(null);
+              setSpeakerOn(false);
+              setLocalStreamUrl(null);
+              setRemoteStreamUrl(null);
+              if (callRef.current === client) {
+                callRef.current = null;
+              }
+              void stopCallAudio();
             }
+          },
+          onLocalStream: (stream) => {
+            setLocalStreamUrl(getStreamUrl(stream));
+          },
+          onRemoteStream: (stream) => {
+            setRemoteStreamUrl(getStreamUrl(stream));
           },
           onError: (message) => {
             showAlert('Call failed', message);
@@ -140,6 +267,10 @@ export function ChatThreadScreen() {
       });
 
       await client.init();
+      await startCallAudio(mode);
+      const defaultSpeaker = mode === 'video';
+      await setSpeaker(defaultSpeaker);
+      setSpeakerOn(defaultSpeaker);
       callRef.current = client;
       return client;
     },
@@ -154,13 +285,8 @@ export function ChatThreadScreen() {
       const uid = await getCurrentUserId();
       setUserId(uid);
 
-      const [rows] = await Promise.all([
-        listMessages(conversationId),
-        markConversationRead(conversationId),
-      ]);
-      setMessages(rows);
-
       if (!uid) return;
+      await ensureDmE2eeReady(uid).catch(() => null);
 
       const [{ data: me }, { data: conversation }] = await Promise.all([
         supabase
@@ -181,11 +307,17 @@ export function ChatThreadScreen() {
       const nextPeerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
       setPeerId(nextPeerId);
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('display_name, username, avatar_url')
-        .eq('id', nextPeerId)
-        .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null }>();
+      const [rows, , { data: profile }] = await Promise.all([
+        listMessages(conversationId, { userId: uid, peerId: nextPeerId }),
+        markConversationRead(conversationId),
+        supabase
+          .from('profiles')
+          .select('display_name, username, avatar_url')
+          .eq('id', nextPeerId)
+          .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null }>(),
+      ]);
+      setMessages(rows);
+
       setPeerName(profile?.display_name || profile?.username || 'Player');
       setPeerAvatarUrl(profile?.avatar_url ?? null);
     } finally {
@@ -219,11 +351,32 @@ export function ChatThreadScreen() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         ({ new: row }) => {
-          setMessages((prev) => {
-            const next = [...prev, row as DmMessage];
-            next.sort((a, b) => a.created_at.localeCompare(b.created_at));
-            return next;
-          });
+          void (async () => {
+            const raw = row as DmMessage;
+            const uid = userIdRef.current;
+            const currentPeerId = peerIdRef.current;
+            let body = isEncryptedEnvelope(raw.body) ? '[Encrypted message]' : raw.body;
+
+            if (uid && currentPeerId) {
+              try {
+                body = await decryptDmMessageBody({
+                  conversationId,
+                  userId: uid,
+                  peerId: currentPeerId,
+                  body: raw.body,
+                });
+              } catch {
+                body = '[Unable to decrypt message]';
+              }
+            }
+
+            setMessages((prev) => {
+              if (prev.some((msg) => msg.id === raw.id)) return prev;
+              const next = [...prev, { ...raw, body }];
+              next.sort((a, b) => a.created_at.localeCompare(b.created_at));
+              return next;
+            });
+          })();
           markConversationRead(conversationId).catch(() => null);
         },
       )
@@ -241,71 +394,105 @@ export function ChatThreadScreen() {
       config: { broadcast: { self: false } },
     });
 
+    const unwrapPayload = async (payload: Record<string, unknown>) => {
+      const toId = typeof payload.toId === 'string' ? payload.toId : null;
+      const currentUserId = userIdRef.current;
+      if (toId && currentUserId && toId !== currentUserId) return null;
+      return decodeCallSignalPayload(payload);
+    };
+
     channel
       .on('broadcast', { event: 'dm-call-invite' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.fromId === userIdRef.current) return;
-        setIncomingInvite({
-          fromId: payload?.fromId,
-          fromName: payload?.fromName || 'Player',
-          mode: payload?.mode === 'video' ? 'video' : 'audio',
-        });
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.fromId === userIdRef.current) return;
+          const fromId = typeof data.fromId === 'string' ? data.fromId : null;
+          if (!fromId) return;
+          setIncomingInvite({
+            fromId,
+            fromName: typeof data.fromName === 'string' ? data.fromName : 'Player',
+            mode: data.mode === 'video' ? 'video' : 'audio',
+          });
+        })();
       })
       .on('broadcast', { event: 'dm-call-accept' }, ({ payload }) => {
-        if (payload?.toId !== userIdRef.current) return;
-        const mode: CallMode = payload?.mode === 'video' ? 'video' : 'audio';
-        clearOutgoingTimer();
-        setOutgoingMode(null);
-        setActiveCallMode(mode);
-        setCameraEnabled(mode === 'video');
         void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data || data.toId !== userIdRef.current) return;
+          const mode: CallMode = data.mode === 'video' ? 'video' : 'audio';
+          clearOutgoingTimer();
+          setOutgoingMode(null);
+          setActiveCallMode(mode);
+          setCameraEnabled(mode === 'video');
           const client = await ensureCallClient(mode);
           if (!client) return;
           await client.startAsCaller();
         })();
       })
       .on('broadcast', { event: 'dm-call-decline' }, ({ payload }) => {
-        if (payload?.toId !== userIdRef.current) return;
-        clearOutgoingTimer();
-        setOutgoingMode(null);
-        showAlert('Call declined', `${payload?.fromName || 'Peer'} declined your call.`);
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data || data.toId !== userIdRef.current) return;
+          clearOutgoingTimer();
+          setOutgoingMode(null);
+          showAlert('Call declined', `${typeof data.fromName === 'string' ? data.fromName : 'Peer'} declined your call.`);
+        })();
       })
       .on('broadcast', { event: 'call-offer' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.conversationId !== conversationIdRef.current) return;
-        if (!payload?.offer) return;
-
-        const mode: CallMode = payload?.mediaMode === 'video' ? 'video' : 'audio';
-        setActiveCallMode(mode);
-        setCameraEnabled(mode === 'video');
-        setIncomingInvite(null);
         void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+          if (!data.offer) return;
+
+          const mode: CallMode = data.mediaMode === 'video' ? 'video' : 'audio';
+          setActiveCallMode(mode);
+          setCameraEnabled(mode === 'video');
+          setIncomingInvite(null);
           const client = await ensureCallClient(mode);
           if (!client) return;
-          await client.handleOffer(payload.offer);
+          await client.handleOffer(data.offer as { type: 'offer' | 'answer'; sdp: string });
         })();
       })
       .on('broadcast', { event: 'call-answer' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.conversationId !== conversationIdRef.current) return;
-        if (!payload?.answer || !callRef.current) return;
-        void callRef.current.handleAnswer(payload.answer);
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+          if (!data.answer || !callRef.current) return;
+          await callRef.current.handleAnswer(data.answer as { type: 'offer' | 'answer'; sdp: string });
+        })();
       })
       .on('broadcast', { event: 'call-ice' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.conversationId !== conversationIdRef.current) return;
-        if (!payload?.candidate || !callRef.current) return;
-        void callRef.current.handleIceCandidate(payload.candidate);
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+          if (!data.candidate || !callRef.current) return;
+          await callRef.current.handleIceCandidate(data.candidate as Record<string, unknown>);
+        })();
       })
       .on('broadcast', { event: 'call-ended' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.conversationId !== conversationIdRef.current) return;
-        void endCall(false);
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+          await endCall(false);
+        })();
       })
       .on('broadcast', { event: 'call-mute' }, ({ payload }) => {
-        if (payload?.toId && payload.toId !== userIdRef.current) return;
-        if (payload?.conversationId !== conversationIdRef.current) return;
-        setOpponentMuted(!!payload?.muted);
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+          setOpponentMuted(!!data.muted);
+        })();
       })
       .subscribe();
 
@@ -317,7 +504,7 @@ export function ChatThreadScreen() {
         callChannelRef.current = null;
       }
     };
-  }, [conversationId, userId, clearOutgoingTimer, ensureCallClient, endCall]);
+  }, [conversationId, userId, clearOutgoingTimer, decodeCallSignalPayload, ensureCallClient, endCall]);
 
   useEffect(() => {
     return () => {
@@ -330,12 +517,15 @@ export function ChatThreadScreen() {
     if (!conversationId || sending) return;
     const body = input.trim();
     if (!body) return;
+    shouldAutoScrollRef.current = true;
 
     setSending(true);
     try {
       const row = await sendMessage(conversationId, body);
       setInput('');
-      await notifyDmMessage(row.id);
+      void notifyDmMessage(row.id).catch((error) => {
+        console.warn('DM push notify failed', error);
+      });
     } catch (e: any) {
       showAlert('Send failed', e?.message ?? 'Could not send message');
     } finally {
@@ -343,7 +533,7 @@ export function ChatThreadScreen() {
     }
   }
 
-  function startCall(mode: CallMode) {
+  async function startCall(mode: CallMode) {
     if (!conversationId || !userId || !peerId) return;
     if (outgoingMode || callState !== 'off') return;
     if (Platform.OS === 'web') {
@@ -355,13 +545,18 @@ export function ChatThreadScreen() {
     setActiveCallMode(mode);
     setCameraEnabled(mode === 'video');
     setOpponentMuted(false);
-    sendCallSignal('dm-call-invite', {
+    const sent = await sendCallSignal('dm-call-invite', {
       conversationId,
       fromId: userId,
       toId: peerId,
       fromName: selfName,
       mode,
     });
+    if (!sent) {
+      setOutgoingMode(null);
+      showAlert('Call failed', 'Unable to send encrypted call invite.');
+      return;
+    }
 
     clearOutgoingTimer();
     callInviteTimeoutRef.current = setTimeout(() => {
@@ -370,22 +565,26 @@ export function ChatThreadScreen() {
     }, OUTGOING_CALL_TIMEOUT_MS);
   }
 
-  function acceptIncomingCall() {
+  async function acceptIncomingCall() {
     if (!conversationId || !userId || !incomingInvite) return;
     setActiveCallMode(incomingInvite.mode);
     setCameraEnabled(incomingInvite.mode === 'video');
-    sendCallSignal('dm-call-accept', {
+    const sent = await sendCallSignal('dm-call-accept', {
       conversationId,
       fromId: userId,
       toId: incomingInvite.fromId,
       mode: incomingInvite.mode,
     });
+    if (!sent) {
+      showAlert('Call failed', 'Unable to send encrypted call accept.');
+      return;
+    }
     setIncomingInvite(null);
   }
 
-  function declineIncomingCall() {
+  async function declineIncomingCall() {
     if (!conversationId || !userId || !incomingInvite) return;
-    sendCallSignal('dm-call-decline', {
+    await sendCallSignal('dm-call-decline', {
       conversationId,
       fromId: userId,
       fromName: selfName,
@@ -398,7 +597,7 @@ export function ChatThreadScreen() {
     if (!callRef.current) return;
     const muted = callRef.current.toggleMute();
     setCallMuted(muted);
-    sendCallSignal('call-mute', {
+    void sendCallSignal('call-mute', {
       conversationId,
       userId,
       toId: peerId,
@@ -411,6 +610,49 @@ export function ChatThreadScreen() {
     const enabled = callRef.current.toggleVideoEnabled();
     setCameraEnabled(enabled);
   }
+
+  async function toggleSpeakerMode() {
+    if (callState === 'off') return;
+    const next = !speakerOn;
+    const ok = await setSpeaker(next);
+    if (!ok) {
+      showAlert('Audio route', 'Unable to change speaker route on this device.');
+      return;
+    }
+    setSpeakerOn(next);
+  }
+
+  const renderMessageItem = useCallback(
+    ({ item }: { item: DmMessage }) => {
+      const mine = item.sender_id === userId;
+      return (
+        <View
+          style={[
+            styles.msgRow,
+            {
+              alignItems: mine ? 'flex-end' : 'flex-start',
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.bubble,
+              {
+                backgroundColor: mine ? `${colors.primary}16` : colors.surfaceVariant,
+                borderColor: mine ? `${colors.primary}35` : colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
+          </View>
+          <Text style={[styles.msgTime, { color: colors.textTertiary }]}>
+            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+      );
+    },
+    [colors, userId],
+  );
 
   const callStateLabel =
     callState === 'live'
@@ -434,6 +676,8 @@ export function ChatThreadScreen() {
           : colors.textSecondary;
   const showCallPanel = !!incomingInvite || !!outgoingMode || callState !== 'off';
   const callStartDisabled = !peerId || !!outgoingMode || callState !== 'off';
+  const canControlCall = callState !== 'off';
+  const showVideoStage = activeCallMode === 'video' && (callState === 'connecting' || callState === 'live' || callState === 'reconnecting');
 
   if (!conversationId) {
     return (
@@ -468,7 +712,7 @@ export function ChatThreadScreen() {
         </View>
         <View style={styles.headerActions}>
           <Pressable
-            onPress={() => startCall('audio')}
+            onPress={() => void startCall('audio')}
             disabled={callStartDisabled}
             style={[
               styles.headerActionBtn,
@@ -481,7 +725,7 @@ export function ChatThreadScreen() {
             <Ionicons name="call-outline" size={16} color={colors.primary} />
           </Pressable>
           <Pressable
-            onPress={() => startCall('video')}
+            onPress={() => void startCall('video')}
             disabled={callStartDisabled}
             style={[
               styles.headerActionBtn,
@@ -511,6 +755,38 @@ export function ChatThreadScreen() {
             <Text style={[styles.callPillText, { color: callStateColor }]}>{callStateLabel}</Text>
           </View>
 
+          {showVideoStage && (
+            <View style={[styles.videoStage, { borderColor: colors.border }]}>
+              <RtcVideoView
+                streamURL={remoteStreamUrl}
+                style={styles.remoteVideo}
+                emptyLabel={callState === 'connecting' ? 'Connecting video...' : 'Waiting for peer video...'}
+              />
+              {!remoteStreamUrl && (
+                <View style={styles.videoRemoteFallback}>
+                  {peerAvatarUrl ? (
+                    <Image source={{ uri: peerAvatarUrl }} style={styles.videoRemoteAvatar} />
+                  ) : (
+                    <View style={[styles.videoRemoteAvatarFallback, { backgroundColor: `${colors.primary}1f` }]}>
+                      <Text style={[styles.videoRemoteAvatarText, { color: colors.primary }]}>
+                        {peerName.slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={[styles.videoRemoteLabel, { color: colors.textSecondary }]}>{peerName}</Text>
+                </View>
+              )}
+              <View style={[styles.videoPipWrap, { borderColor: colors.border }]}>
+                <RtcVideoView
+                  streamURL={localStreamUrl}
+                  style={styles.videoPip}
+                  mirror
+                  emptyLabel={cameraEnabled ? 'Loading camera...' : 'Camera off'}
+                />
+              </View>
+            </View>
+          )}
+
           {!!incomingInvite && (
             <View style={styles.callInviteRow}>
               <Text style={[styles.callInviteText, { color: colors.text }]}>
@@ -518,13 +794,13 @@ export function ChatThreadScreen() {
               </Text>
               <View style={styles.callInviteActions}>
                 <Pressable
-                  onPress={acceptIncomingCall}
+                  onPress={() => void acceptIncomingCall()}
                   style={[styles.callActionBtn, { backgroundColor: colors.correct }]}
                 >
                   <Text style={styles.callActionText}>Accept</Text>
                 </Pressable>
                 <Pressable
-                  onPress={declineIncomingCall}
+                  onPress={() => void declineIncomingCall()}
                   style={[styles.callActionBtn, { backgroundColor: colors.wrong }]}
                 >
                   <Text style={styles.callActionText}>Decline</Text>
@@ -537,9 +813,11 @@ export function ChatThreadScreen() {
             <View style={styles.callControlRow}>
               <Pressable
                 onPress={toggleMute}
+                disabled={!canControlCall}
                 style={[
                   styles.callControlBtn,
                   {
+                    opacity: canControlCall ? 1 : 0.45,
                     borderColor: callMuted ? `${colors.warning}35` : `${colors.primary}35`,
                     backgroundColor: callMuted ? `${colors.warning}14` : `${colors.primary}14`,
                   },
@@ -554,9 +832,11 @@ export function ChatThreadScreen() {
               {activeCallMode === 'video' && (
                 <Pressable
                   onPress={toggleCamera}
+                  disabled={!canControlCall || activeCallMode !== 'video'}
                   style={[
                     styles.callControlBtn,
                     {
+                      opacity: canControlCall ? 1 : 0.45,
                       borderColor: cameraEnabled ? `${colors.secondary}35` : `${colors.warning}35`,
                       backgroundColor: cameraEnabled ? `${colors.secondary}14` : `${colors.warning}14`,
                     },
@@ -574,10 +854,34 @@ export function ChatThreadScreen() {
               )}
 
               <Pressable
-                onPress={() => void endCall(true)}
+                onPress={() => void toggleSpeakerMode()}
+                disabled={!canControlCall}
                 style={[
                   styles.callControlBtn,
                   {
+                    opacity: canControlCall ? 1 : 0.45,
+                    borderColor: speakerOn ? `${colors.primary}35` : `${colors.border}`,
+                    backgroundColor: speakerOn ? `${colors.primary}14` : colors.surfaceVariant,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={speakerOn ? 'volume-high-outline' : 'volume-mute-outline'}
+                  size={16}
+                  color={speakerOn ? colors.primary : colors.textSecondary}
+                />
+                <Text style={[styles.callControlText, { color: speakerOn ? colors.primary : colors.textSecondary }]}>
+                  {speakerOn ? 'Speaker On' : 'Speaker Off'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => void endCall(true)}
+                disabled={!canControlCall}
+                style={[
+                  styles.callControlBtn,
+                  {
+                    opacity: canControlCall ? 1 : 0.45,
                     borderColor: `${colors.wrong}35`,
                     backgroundColor: `${colors.wrong}14`,
                   },
@@ -606,44 +910,44 @@ export function ChatThreadScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
-        <View style={styles.body}>
-          <ScrollView contentContainerStyle={styles.logContent} style={styles.log}>
-            {sortedMessages.length === 0 ? (
+        <KeyboardAvoidingView
+          style={styles.body}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        >
+          <FlatList
+            ref={messageListRef}
+            style={styles.log}
+            contentContainerStyle={[
+              styles.logContent,
+              {
+                paddingBottom: composerHeight + insets.bottom + spacing.sm,
+              },
+            ]}
+            data={sortedMessages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessageItem}
+            onScroll={onListScroll}
+            keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={16}
+            ListEmptyComponent={
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No messages yet. Say hi.</Text>
-            ) : (
-              sortedMessages.map((msg) => {
-                const mine = msg.sender_id === userId;
-                return (
-                  <View
-                    key={msg.id}
-                    style={[
-                      styles.msgRow,
-                      {
-                        alignItems: mine ? 'flex-end' : 'flex-start',
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.bubble,
-                        {
-                          backgroundColor: mine ? `${colors.primary}16` : colors.surfaceVariant,
-                          borderColor: mine ? `${colors.primary}35` : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text style={[styles.msgBody, { color: colors.text }]}>{msg.body}</Text>
-                    </View>
-                    <Text style={[styles.msgTime, { color: colors.textTertiary }]}>
-                      {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  </View>
-                );
-              })
-            )}
-          </ScrollView>
+            }
+          />
 
-          <View style={[styles.composer, { borderTopColor: colors.border }]}>
+          <View
+            style={[
+              styles.composer,
+              {
+                borderTopColor: colors.border,
+                backgroundColor: colors.surface,
+                paddingBottom: Math.max(insets.bottom, spacing.sm),
+              },
+            ]}
+            onLayout={(event) => {
+              setComposerHeight(event.nativeEvent.layout.height);
+            }}
+          >
             <TextInput
               value={input}
               onChangeText={setInput}
@@ -674,7 +978,7 @@ export function ChatThreadScreen() {
               <Ionicons name="send" size={16} color="#fff" />
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );
@@ -742,6 +1046,58 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   callPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  videoStage: {
+    height: VIDEO_STAGE_HEIGHT,
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  remoteVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  videoRemoteFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  videoRemoteAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  videoRemoteAvatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoRemoteAvatarText: {
+    fontSize: fontSize.base,
+    fontWeight: fontWeight.bold,
+  },
+  videoRemoteLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+  },
+  videoPipWrap: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 96,
+    height: 132,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+  videoPip: {
+    width: '100%',
+    height: '100%',
+  },
   callInviteRow: { gap: spacing.sm },
   callInviteText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
   callInviteActions: { flexDirection: 'row', gap: spacing.sm },
@@ -752,9 +1108,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   callActionText: { color: '#fff', fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-  callControlRow: { flexDirection: 'row', gap: spacing.sm },
+  callControlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   callControlBtn: {
-    flex: 1,
+    minWidth: '46%',
+    flexGrow: 1,
     borderWidth: 1,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.sm,

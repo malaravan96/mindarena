@@ -1,13 +1,15 @@
 import React, { useEffect } from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BlurView } from 'expo-blur';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { upsertCurrentUserPushToken } from '@/lib/push';
+import * as Notifications from 'expo-notifications';
 
 export default function AppLayout() {
+  const router = useRouter();
   const { colors, colorScheme } = useTheme();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === 'ios';
@@ -16,6 +18,33 @@ export default function AppLayout() {
   useEffect(() => {
     upsertCurrentUserPushToken().catch(() => null);
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const routeFromPayload = (raw: unknown) => {
+      const data = raw as { type?: unknown; conversation_id?: unknown } | null | undefined;
+      if (data?.type !== 'dm') return;
+      if (typeof data.conversation_id !== 'string') return;
+      router.push({ pathname: '/chat-thread', params: { conversationId: data.conversation_id } });
+    };
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (!mounted || !response) return;
+        routeFromPayload(response.notification.request.content.data);
+      })
+      .catch(() => null);
+
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      routeFromPayload(response.notification.request.content.data);
+    });
+
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, [router]);
 
   return (
     <Tabs

@@ -3,6 +3,7 @@ import type { CallUiState } from '@/lib/types';
 
 type AnyCandidate = Record<string, unknown>;
 type AnySessionDescription = { type: 'offer' | 'answer'; sdp: string };
+type AnyMediaStream = any;
 
 type WebRTCModule = {
   registerGlobals?: () => void;
@@ -55,6 +56,8 @@ type DmCallSignalSender = (
 
 type DmWebRTCCallCallbacks = {
   onStateChange: (state: CallUiState) => void;
+  onLocalStream?: (stream: AnyMediaStream | null) => void;
+  onRemoteStream?: (stream: AnyMediaStream | null) => void;
   onError?: (message: string) => void;
 };
 
@@ -258,6 +261,7 @@ export class DmWebRTCCall {
   private readonly options: DmWebRTCCallOptions;
   private pc: any = null;
   private localStream: any = null;
+  private remoteStream: any = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private muted = false;
   private closed = false;
@@ -280,10 +284,12 @@ export class DmWebRTCCall {
     if (this.closed || this.pc) return;
     const WebRTC = getWebRTCModule();
 
+    this.remoteStream = null;
     this.localStream = await WebRTC.mediaDevices.getUserMedia({
       audio: true,
       video: this.options.mediaMode === 'video',
     });
+    this.options.callbacks.onLocalStream?.(this.localStream);
     this.pc = new WebRTC.RTCPeerConnection({ iceServers: this.options.iceServers });
 
     this.localStream.getTracks().forEach((track: any) => {
@@ -297,6 +303,25 @@ export class DmWebRTCCall {
         userId: this.options.userId,
         candidate: event.candidate,
       });
+    };
+
+    this.pc.ontrack = (event: { streams?: AnyMediaStream[]; track?: any }) => {
+      const nextStream = event.streams?.[0];
+      if (nextStream && this.remoteStream?.id !== nextStream.id) {
+        this.remoteStream = nextStream;
+        this.options.callbacks.onRemoteStream?.(nextStream);
+      }
+
+      if (event.track) {
+        event.track.onended = () => {
+          const tracks = this.remoteStream?.getTracks?.() ?? [];
+          const hasActive = tracks.some((track: { readyState?: string }) => track.readyState !== 'ended');
+          if (!hasActive) {
+            this.remoteStream = null;
+            this.options.callbacks.onRemoteStream?.(null);
+          }
+        };
+      }
     };
 
     const handleConnectionChange = () => {
@@ -407,6 +432,7 @@ export class DmWebRTCCall {
 
     if (this.pc) {
       this.pc.onicecandidate = null;
+      this.pc.ontrack = null;
       this.pc.onconnectionstatechange = null;
       this.pc.oniceconnectionstatechange = null;
       try {
@@ -425,6 +451,10 @@ export class DmWebRTCCall {
       }
       this.localStream = null;
     }
+
+    this.remoteStream = null;
+    this.options.callbacks.onLocalStream?.(null);
+    this.options.callbacks.onRemoteStream?.(null);
 
     this.emitState(finalState === 'failed' ? 'off' : finalState);
   }
