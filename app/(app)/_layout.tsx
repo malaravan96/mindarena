@@ -1,19 +1,56 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@/contexts/ThemeContext';
 import { BlurView } from 'expo-blur';
+import * as Notifications from 'expo-notifications';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '@/contexts/ThemeContext';
 import { upsertCurrentUserPushToken } from '@/lib/push';
-import * as Notifications from 'expo-notifications';
+
+type TabRoute = 'index' | 'leaderboard' | 'pvp' | 'profile' | 'chat';
+
+type NotificationPayload = {
+  type?: unknown;
+  conversation_id?: unknown;
+};
+
+type TabConfig = {
+  name: TabRoute;
+  title: string;
+  icon: {
+    active: keyof typeof Ionicons.glyphMap;
+    inactive: keyof typeof Ionicons.glyphMap;
+  };
+};
+
+const TAB_CONFIG: TabConfig[] = [
+  { name: 'index', title: 'Home', icon: { active: 'home', inactive: 'home-outline' } },
+  {
+    name: 'leaderboard',
+    title: 'Rankings',
+    icon: { active: 'trophy', inactive: 'trophy-outline' },
+  },
+  { name: 'pvp', title: 'Battle', icon: { active: 'flash', inactive: 'flash-outline' } },
+  {
+    name: 'profile',
+    title: 'Profile',
+    icon: { active: 'person', inactive: 'person-outline' },
+  },
+  {
+    name: 'chat',
+    title: 'Chat',
+    icon: { active: 'chatbubble-ellipses', inactive: 'chatbubble-ellipses-outline' },
+  },
+];
 
 export default function AppLayout() {
   const router = useRouter();
   const { colors, colorScheme } = useTheme();
   const insets = useSafeAreaInsets();
+
   const isIOS = Platform.OS === 'ios';
-  const bottomInset = Math.max(insets.bottom, isIOS ? 16 : 8);
+  const bottomInset = Math.max(insets.bottom, isIOS ? 14 : 10);
 
   useEffect(() => {
     upsertCurrentUserPushToken().catch(() => null);
@@ -23,10 +60,14 @@ export default function AppLayout() {
     let mounted = true;
 
     const routeFromPayload = (raw: unknown) => {
-      const data = raw as { type?: unknown; conversation_id?: unknown } | null | undefined;
+      const data = raw as NotificationPayload | null | undefined;
       if (data?.type !== 'dm') return;
       if (typeof data.conversation_id !== 'string') return;
-      router.push({ pathname: '/chat-thread', params: { conversationId: data.conversation_id } });
+
+      router.push({
+        pathname: '/chat-thread',
+        params: { conversationId: data.conversation_id },
+      });
     };
 
     Notifications.getLastNotificationResponseAsync()
@@ -46,92 +87,81 @@ export default function AppLayout() {
     };
   }, [router]);
 
+  const screenOptions = useMemo(
+    () => ({
+      headerShown: false,
+      tabBarActiveTintColor: colors.primary,
+      tabBarInactiveTintColor: colors.textSecondary,
+      tabBarHideOnKeyboard: true,
+      tabBarStyle: {
+        position: 'absolute' as const,
+        left: 12,
+        right: 12,
+        bottom: 8,
+        height: 62 + bottomInset,
+        paddingBottom: bottomInset,
+        paddingTop: 8,
+        borderTopWidth: 0,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: 22,
+        backgroundColor: isIOS ? 'transparent' : colors.surface,
+        elevation: 0,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: colorScheme === 'dark' ? 0.28 : 0.08,
+        shadowRadius: 20,
+      },
+      tabBarItemStyle: {
+        paddingVertical: 2,
+      },
+      tabBarBackground: () =>
+        isIOS ? (
+          <BlurView
+            tint={colorScheme === 'dark' ? 'dark' : 'light'}
+            intensity={85}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+        ),
+      tabBarLabelStyle: {
+        fontSize: 11,
+        fontWeight: '600' as const,
+        marginTop: 2,
+      },
+    }),
+    [bottomInset, colorScheme, colors, isIOS],
+  );
+
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarHideOnKeyboard: true,
-        tabBarStyle: {
-          position: 'absolute',
-          backgroundColor: isIOS ? 'transparent' : colors.surface,
-          borderTopWidth: 0,
-          elevation: 0,
-          shadowOpacity: 0,
-          height: 58 + bottomInset,
-          paddingBottom: Math.max(bottomInset - 4, 8),
-          paddingTop: 8,
-        },
-        tabBarItemStyle: {
-          paddingVertical: 2,
-        },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView
-              tint={colorScheme === 'dark' ? 'dark' : 'light'}
-              intensity={90}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
-          ),
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          marginTop: 1,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={size + 2} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="leaderboard"
-        options={{
-          title: 'Rankings',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'trophy' : 'trophy-outline'} size={size + 2} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="pvp"
-        options={{
-          title: 'Battle',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'flash' : 'flash-outline'} size={size + 2} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={size + 2} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="chat"
-        options={{
-          title: 'Chat',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline'}
-              size={size + 2}
-              color={color}
-            />
-          ),
-        }}
-      />
+    <Tabs screenOptions={screenOptions}>
+      {TAB_CONFIG.map((tab) => (
+        <Tabs.Screen
+          key={tab.name}
+          name={tab.name}
+          options={{
+            title: tab.title,
+            tabBarIcon: ({ color, size, focused }) => (
+              <View
+                style={[
+                  styles.iconContainer,
+                  focused && {
+                    backgroundColor:
+                      colorScheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={focused ? tab.icon.active : tab.icon.inactive}
+                  size={size + 1}
+                  color={color}
+                />
+              </View>
+            ),
+          }}
+        />
+      ))}
       <Tabs.Screen
         name="chat-thread"
         options={{
@@ -142,3 +172,13 @@ export default function AppLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  iconContainer: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

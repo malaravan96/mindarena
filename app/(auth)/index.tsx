@@ -149,16 +149,16 @@ export default function SignIn() {
   return (
     <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
       <AuthHeader
-        icon={<MaterialCommunityIcons name="brain" size={36} color="#ffffff" />}
+        logo={require('@/assets/logo.png')}
         title="MindArena"
         subtitle={step === 'email' ? 'Play daily. Think sharper. Stay ahead.' : `Enter the code sent to ${email}`}
         onBack={
           step === 'otp'
             ? () => {
-                setStep('email');
-                setOtp(Array(OTP_LENGTH).fill(''));
-                setError('');
-              }
+              setStep('email');
+              setOtp(Array(OTP_LENGTH).fill(''));
+              setError('');
+            }
             : undefined
         }
       />
@@ -206,7 +206,7 @@ export default function SignIn() {
               style={styles.primaryCta}
             />
 
-            <View style={[styles.infoChip, { backgroundColor: colors.surfaceVariant }]}> 
+            <View style={[styles.infoChip, { backgroundColor: colors.surfaceVariant }]}>
               <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} />
               <Text style={[styles.infoChipText, { color: colors.textSecondary }]}>No password needed. Your code expires in 10 minutes.</Text>
             </View>
@@ -220,7 +220,7 @@ export default function SignIn() {
             <Link href="/(auth)/sign-in-password" asChild>
               <Button
                 title="Use Password Instead"
-                onPress={() => {}}
+                onPress={() => { }}
                 variant="outline"
                 fullWidth
                 size="lg"
@@ -311,7 +311,7 @@ function FeatureItem({
   colors: any;
 }) {
   return (
-    <View style={[styles.featureItem, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+    <View style={[styles.featureItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={[styles.featureIconWrap, { backgroundColor: `${colors.primary}16` }]}>{icon}</View>
       <Text style={[styles.featureText, { color: colors.textSecondary }]}>{text}</Text>
     </View>

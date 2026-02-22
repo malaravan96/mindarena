@@ -7,6 +7,11 @@
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "plugins": [
       "expo-router",
       "expo-font",
@@ -46,18 +51,12 @@
         "backgroundColor": "#ffffff"
       }
     },
-    "notification": {
-      "color": "#2563eb",
-      "iosDisplayInForeground": true
-    },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/logo.png"
     },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "528bd82b-26ec-4296-834e-3dbbe95def41"
-      }
+    "eas": {
+      "projectId": "528bd82b-26ec-4296-834e-3dbbe95def41"
     }
   }
 }

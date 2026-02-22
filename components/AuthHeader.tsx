@@ -1,18 +1,19 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 
 interface AuthHeaderProps {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
+  logo?: any;
   title: string;
   subtitle?: string;
   onBack?: () => void;
 }
 
-export function AuthHeader({ icon, title, subtitle, onBack }: AuthHeaderProps) {
+export function AuthHeader({ icon, logo, title, subtitle, onBack }: AuthHeaderProps) {
   const { colors } = useTheme();
 
   return (
@@ -40,7 +41,11 @@ export function AuthHeader({ icon, title, subtitle, onBack }: AuthHeaderProps) {
         end={{ x: 1, y: 1 }}
         style={styles.iconCircle}
       >
-        {icon}
+        {logo ? (
+          <Image source={logo} style={styles.logoImage} resizeMode="contain" />
+        ) : (
+          icon
+        )}
       </LinearGradient>
 
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
@@ -85,6 +90,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 48,
+    height: 48,
   },
   title: {
     fontSize: fontSize['3xl'],
