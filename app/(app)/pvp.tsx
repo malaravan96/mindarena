@@ -147,6 +147,7 @@ export default function PvpScreen() {
   const inviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callRef = useRef<PvpWebRTCCall | null>(null);
+  const callInitPromiseRef = useRef<Promise<PvpWebRTCCall | null> | null>(null);
   const callSessionIdRef = useRef<string | null>(null);
   const phaseRef = useRef<Phase>('lobby');
   const mySubmittedRef = useRef(false);
@@ -377,44 +378,59 @@ export default function PvpScreen() {
     if (Platform.OS === 'web') return null;
     if (callRef.current) return callRef.current;
     if (!matchIdRef.current || !userIdRef.current) return null;
+    if (callInitPromiseRef.current) return callInitPromiseRef.current;
 
-    const client = new PvpWebRTCCall({
-      matchId: matchIdRef.current,
-      userId: userIdRef.current,
-      iceServers: buildIceServers(),
-      sendSignal: (event, payload) => {
-        sendCallSignal(event, payload);
-      },
-      callbacks: {
-        onStateChange: (state) => {
-          setCallState(state);
-          sendCallSignal('call-state', {
-            matchId: matchIdRef.current,
-            playerId: userIdRef.current,
-            state,
-          });
-          if (state === 'live') {
-            updateCallSession('connected').catch(() => null);
-          }
-          if (state === 'off') {
-            setCallMuted(false);
-            setCallSpeakerOn(true);
-            void stopCallAudio();
-          }
+    const initPromise: Promise<PvpWebRTCCall | null> = (async () => {
+      const client = new PvpWebRTCCall({
+        matchId: matchIdRef.current!,
+        userId: userIdRef.current!,
+        iceServers: buildIceServers(),
+        sendSignal: (event, payload) => {
+          sendCallSignal(event, payload);
         },
-        onError: () => {
-          setCallState('reconnecting');
+        callbacks: {
+          onStateChange: (state) => {
+            setCallState(state);
+            sendCallSignal('call-state', {
+              matchId: matchIdRef.current,
+              playerId: userIdRef.current,
+              state,
+            });
+            if (state === 'live') {
+              updateCallSession('connected').catch(() => null);
+            }
+            if (state === 'off') {
+              setCallMuted(false);
+              setCallSpeakerOn(true);
+              void stopCallAudio();
+            }
+          },
+          onError: () => {
+            setCallState('reconnecting');
+          },
         },
-      },
-    });
+      });
 
+      try {
+        await startCallAudio('audio');
+        await setSpeaker(callSpeakerOn);
+        await client.init();
+        callRef.current = client;
+        return client;
+      } catch {
+        setCallState('off');
+        await stopCallAudio().catch(() => null);
+        return null;
+      }
+    })();
+
+    callInitPromiseRef.current = initPromise;
     try {
-      await client.init();
-      callRef.current = client;
-      return client;
-    } catch {
-      setCallState('off');
-      return null;
+      return await initPromise;
+    } finally {
+      if (callInitPromiseRef.current === initPromise) {
+        callInitPromiseRef.current = null;
+      }
     }
   }
 
@@ -440,22 +456,14 @@ export default function PvpScreen() {
 
   async function startLiveMatchCall() {
     if (Platform.OS === 'web') return;
-    if (callRef.current) return;
-
-    await startCallAudio('audio');
-    await setSpeaker(callSpeakerOn);
+    if (callRef.current || callInitPromiseRef.current) return;
+    if (!isHostRef.current) return;
 
     const client = await ensureLiveCallClient();
-    if (!client) {
-      await stopCallAudio();
-      return;
-    }
+    if (!client) return;
 
-    setCallState('connecting');
-    if (isHostRef.current) {
-      await createCallSessionIfHost();
-      await client.startAsCaller();
-    }
+    await createCallSessionIfHost();
+    await client.startAsCaller();
   }
 
   async function handleCallOffer(payload: any) {
@@ -480,6 +488,7 @@ export default function PvpScreen() {
   async function endLiveMatchCall(sendSignal: boolean, failed = false) {
     const active = callRef.current;
     callRef.current = null;
+    callInitPromiseRef.current = null;
     setCallMuted(false);
     setCallSpeakerOn(true);
     setOpponentMuted(false);
@@ -968,7 +977,13 @@ export default function PvpScreen() {
       .on('broadcast', { event: 'call-state' }, ({ payload }) => {
         if (!isValidOpponentPayload(payload)) return;
         if (payload.state === 'reconnecting') setCallState('reconnecting');
-        if (payload.state === 'off') setCallState('off');
+        if (payload.state === 'off') {
+          if (callRef.current) {
+            void endLiveMatchCall(false);
+          } else {
+            setCallState('off');
+          }
+        }
       })
       .on('broadcast', { event: 'call-ended' }, ({ payload }) => {
         if (!isValidOpponentPayload(payload)) return;

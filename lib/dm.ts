@@ -265,6 +265,7 @@ export async function sendMessage(conversationId: string, body: string) {
       userId: uid,
       peerId,
       body: text,
+      forceRefreshPeerKey: true,
     });
   } catch (error) {
     if (!isPeerE2eeNotReadyError(error)) throw error;

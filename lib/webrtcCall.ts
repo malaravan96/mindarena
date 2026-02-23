@@ -71,12 +71,14 @@ type DmWebRTCCallOptions = {
 };
 
 const RECONNECT_TIMEOUT_MS = 15_000;
+const INITIAL_CONNECT_TIMEOUT_MS = 20_000;
 
 export class PvpWebRTCCall {
   private readonly options: WebRTCCallOptions;
   private pc: any = null;
   private localStream: any = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private initialConnectTimer: ReturnType<typeof setTimeout> | null = null;
   private muted = false;
   private closed = false;
 
@@ -112,6 +114,7 @@ export class PvpWebRTCCall {
       const state = this.pc?.connectionState || this.pc?.iceConnectionState;
       if (state === 'connected') {
         this.clearReconnectTimer();
+        this.clearInitialConnectTimer();
         this.emitState('live');
         return;
       }
@@ -120,6 +123,7 @@ export class PvpWebRTCCall {
         return;
       }
       if (state === 'closed') {
+        this.clearInitialConnectTimer();
         this.emitState('off');
       }
     };
@@ -134,6 +138,7 @@ export class PvpWebRTCCall {
     if (!this.pc) return;
 
     this.emitState('connecting');
+    this.startInitialConnectWindow();
     const offer = await this.pc.createOffer({ offerToReceiveAudio: true });
     await this.pc.setLocalDescription(offer);
 
@@ -151,6 +156,7 @@ export class PvpWebRTCCall {
 
     const WebRTC = getWebRTCModule();
     this.emitState('connecting');
+    this.startInitialConnectWindow();
     await this.pc.setRemoteDescription(new WebRTC.RTCSessionDescription(offer));
 
     const answer = await this.pc.createAnswer();
@@ -192,6 +198,7 @@ export class PvpWebRTCCall {
     if (this.closed) return;
     this.closed = true;
     this.clearReconnectTimer();
+    this.clearInitialConnectTimer();
 
     if (sendEndedSignal) {
       this.options.sendSignal('call-ended', {
@@ -230,6 +237,7 @@ export class PvpWebRTCCall {
 
   private startReconnectWindow() {
     if (this.reconnectTimer || this.closed) return;
+    this.clearInitialConnectTimer();
     this.emitState('reconnecting');
     this.options.sendSignal('call-state', {
       matchId: this.options.matchId,
@@ -255,6 +263,22 @@ export class PvpWebRTCCall {
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
   }
+
+  private startInitialConnectWindow() {
+    if (this.initialConnectTimer || this.closed) return;
+    this.initialConnectTimer = setTimeout(() => {
+      this.initialConnectTimer = null;
+      if (this.closed) return;
+      this.options.callbacks.onError?.('Voice connect timeout');
+      this.close(false, 'failed').catch(() => null);
+    }, INITIAL_CONNECT_TIMEOUT_MS);
+  }
+
+  private clearInitialConnectTimer() {
+    if (!this.initialConnectTimer) return;
+    clearTimeout(this.initialConnectTimer);
+    this.initialConnectTimer = null;
+  }
 }
 
 export class DmWebRTCCall {
@@ -263,6 +287,7 @@ export class DmWebRTCCall {
   private localStream: any = null;
   private remoteStream: any = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private initialConnectTimer: ReturnType<typeof setTimeout> | null = null;
   private muted = false;
   private closed = false;
   private videoEnabled = true;
@@ -328,6 +353,7 @@ export class DmWebRTCCall {
       const state = this.pc?.connectionState || this.pc?.iceConnectionState;
       if (state === 'connected') {
         this.clearReconnectTimer();
+        this.clearInitialConnectTimer();
         this.emitState('live');
         return;
       }
@@ -336,6 +362,7 @@ export class DmWebRTCCall {
         return;
       }
       if (state === 'closed') {
+        this.clearInitialConnectTimer();
         this.emitState('off');
       }
     };
@@ -350,6 +377,7 @@ export class DmWebRTCCall {
     if (!this.pc) return;
 
     this.emitState('connecting');
+    this.startInitialConnectWindow();
     const offer = await this.pc.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: this.options.mediaMode === 'video',
@@ -371,6 +399,7 @@ export class DmWebRTCCall {
 
     const WebRTC = getWebRTCModule();
     this.emitState('connecting');
+    this.startInitialConnectWindow();
     await this.pc.setRemoteDescription(new WebRTC.RTCSessionDescription(offer));
 
     const answer = await this.pc.createAnswer();
@@ -422,6 +451,7 @@ export class DmWebRTCCall {
     if (this.closed) return;
     this.closed = true;
     this.clearReconnectTimer();
+    this.clearInitialConnectTimer();
 
     if (sendEndedSignal) {
       this.options.sendSignal('call-ended', {
@@ -465,6 +495,7 @@ export class DmWebRTCCall {
 
   private startReconnectWindow() {
     if (this.reconnectTimer || this.closed) return;
+    this.clearInitialConnectTimer();
     this.emitState('reconnecting');
     this.options.sendSignal('call-state', {
       conversationId: this.options.conversationId,
@@ -489,5 +520,21 @@ export class DmWebRTCCall {
     if (!this.reconnectTimer) return;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+  }
+
+  private startInitialConnectWindow() {
+    if (this.initialConnectTimer || this.closed) return;
+    this.initialConnectTimer = setTimeout(() => {
+      this.initialConnectTimer = null;
+      if (this.closed) return;
+      this.options.callbacks.onError?.('Call connect timeout');
+      this.close(false, 'failed').catch(() => null);
+    }, INITIAL_CONNECT_TIMEOUT_MS);
+  }
+
+  private clearInitialConnectTimer() {
+    if (!this.initialConnectTimer) return;
+    clearTimeout(this.initialConnectTimer);
+    this.initialConnectTimer = null;
   }
 }

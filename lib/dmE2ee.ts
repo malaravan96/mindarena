@@ -14,6 +14,7 @@ type LocalKeyPair = {
 };
 
 const localKeyCache = new Map<string, LocalKeyPair>();
+const localKeyPromiseCache = new Map<string, Promise<LocalKeyPair>>();
 const peerPublicKeyCache = new Map<string, Uint8Array>();
 const publishedKeyForUser = new Set<string>();
 let secureStoreAvailable: boolean | null = null;
@@ -136,26 +137,42 @@ async function ensureLocalKeyPair(userId: string): Promise<LocalKeyPair> {
   const cached = localKeyCache.get(userId);
   if (cached) return cached;
 
-  const stored = await loadStoredLocalKey(userId);
-  if (stored) {
-    localKeyCache.set(userId, stored);
-    await publishPublicKey(userId, toHex(stored.publicKey));
-    return stored;
-  }
+  const existingPromise = localKeyPromiseCache.get(userId);
+  if (existingPromise) return existingPromise;
 
-  const seed = await getRandomBytes(nacl.box.secretKeyLength);
-  const seed32 = seed.slice(0, nacl.box.secretKeyLength);
-  const pair = nacl.box.keyPair.fromSecretKey(seed32);
-  const next = { publicKey: pair.publicKey, secretKey: pair.secretKey };
-  localKeyCache.set(userId, next);
-  await persistLocalKey(userId, next);
-  await publishPublicKey(userId, toHex(next.publicKey));
-  return next;
+  const createPromise = (async () => {
+    const stored = await loadStoredLocalKey(userId);
+    if (stored) {
+      localKeyCache.set(userId, stored);
+      await publishPublicKey(userId, toHex(stored.publicKey));
+      return stored;
+    }
+
+    const seed = await getRandomBytes(nacl.box.secretKeyLength);
+    const seed32 = seed.slice(0, nacl.box.secretKeyLength);
+    const pair = nacl.box.keyPair.fromSecretKey(seed32);
+    const next = { publicKey: pair.publicKey, secretKey: pair.secretKey };
+    localKeyCache.set(userId, next);
+    await persistLocalKey(userId, next);
+    await publishPublicKey(userId, toHex(next.publicKey));
+    return next;
+  })();
+
+  localKeyPromiseCache.set(userId, createPromise);
+  try {
+    return await createPromise;
+  } finally {
+    if (localKeyPromiseCache.get(userId) === createPromise) {
+      localKeyPromiseCache.delete(userId);
+    }
+  }
 }
 
-async function getPublicKey(userId: string): Promise<Uint8Array> {
-  const cached = peerPublicKeyCache.get(userId);
-  if (cached) return cached;
+async function getPublicKey(userId: string, options?: { forceRefresh?: boolean }): Promise<Uint8Array> {
+  if (!options?.forceRefresh) {
+    const cached = peerPublicKeyCache.get(userId);
+    if (cached) return cached;
+  }
 
   const { data, error } = await supabase
     .from('dm_user_keys')
@@ -175,9 +192,16 @@ async function getPublicKey(userId: string): Promise<Uint8Array> {
   return key;
 }
 
-async function deriveConversationKey(conversationId: string, userId: string, peerId: string) {
+async function deriveConversationKey(
+  conversationId: string,
+  userId: string,
+  peerId: string,
+  options?: { forceRefreshPeerKey?: boolean },
+) {
   const me = await ensureLocalKeyPair(userId);
-  const peerPublicKey = await getPublicKey(peerId);
+  const peerPublicKey = await getPublicKey(peerId, {
+    forceRefresh: options?.forceRefreshPeerKey,
+  });
   const shared = nacl.box.before(peerPublicKey, me.secretKey);
   const context = encoder.encode(`${CONTEXT_PREFIX}:${conversationId}`);
   const material = concatBytes([shared, context]);
@@ -204,8 +228,11 @@ export async function encryptDmMessageBody(params: {
   userId: string;
   peerId: string;
   body: string;
+  forceRefreshPeerKey?: boolean;
 }) {
-  const key = await deriveConversationKey(params.conversationId, params.userId, params.peerId);
+  const key = await deriveConversationKey(params.conversationId, params.userId, params.peerId, {
+    forceRefreshPeerKey: params.forceRefreshPeerKey,
+  });
   const nonce = await getRandomBytes(nacl.secretbox.nonceLength);
   const cipher = nacl.secretbox(encoder.encode(params.body), nonce, key);
   return `${ENVELOPE_PREFIX}:${toHex(nonce)}:${toHex(cipher)}`;
@@ -220,10 +247,19 @@ export async function decryptDmMessageBody(params: {
   const envelope = getEnvelopeParts(params.body);
   if (!envelope) return params.body;
 
-  const key = await deriveConversationKey(params.conversationId, params.userId, params.peerId);
   const nonce = fromHex(envelope.nonceHex);
   const cipher = fromHex(envelope.cipherHex);
-  const plain = nacl.secretbox.open(cipher, nonce, key);
+  const decryptWith = async (forceRefreshPeerKey: boolean) => {
+    const key = await deriveConversationKey(params.conversationId, params.userId, params.peerId, {
+      forceRefreshPeerKey,
+    });
+    return nacl.secretbox.open(cipher, nonce, key);
+  };
+
+  let plain = await decryptWith(false);
+  if (!plain) {
+    plain = await decryptWith(true);
+  }
   if (!plain) {
     throw new Error('Failed to decrypt message');
   }
@@ -235,6 +271,7 @@ export async function encryptDmCallPayload(params: {
   userId: string;
   peerId: string;
   payload: Record<string, unknown>;
+  forceRefreshPeerKey?: boolean;
 }) {
   const json = JSON.stringify(params.payload);
   const envelope = await encryptDmMessageBody({
@@ -242,6 +279,7 @@ export async function encryptDmCallPayload(params: {
     userId: params.userId,
     peerId: params.peerId,
     body: json,
+    forceRefreshPeerKey: params.forceRefreshPeerKey,
   });
   return envelope;
 }

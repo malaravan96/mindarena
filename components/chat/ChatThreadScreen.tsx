@@ -77,6 +77,7 @@ export function ChatThreadScreen() {
 
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const callRef = useRef<DmWebRTCCall | null>(null);
+  const callInitPromiseRef = useRef<Promise<DmWebRTCCall | null> | null>(null);
   const callInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageListRef = useRef<FlatList<DmMessage> | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -155,6 +156,7 @@ export function ChatThreadScreen() {
         userId: uid,
         peerId: resolvedPeerId,
         payload,
+        forceRefreshPeerKey: event !== 'call-ice',
       });
       await channel.send({
         type: 'broadcast',
@@ -222,6 +224,7 @@ export function ChatThreadScreen() {
   const endCall = useCallback(
     async (sendEndedSignal: boolean) => {
       clearOutgoingTimer();
+      callInitPromiseRef.current = null;
       setIncomingInvite(null);
       setOutgoingMode(null);
       setCallState('off');
@@ -250,51 +253,71 @@ export function ChatThreadScreen() {
         return null;
       }
       if (callRef.current) return callRef.current;
+      if (callInitPromiseRef.current) return callInitPromiseRef.current;
 
-      const client = new DmWebRTCCall({
-        conversationId: conversationIdRef.current,
-        userId: userIdRef.current,
-        mediaMode: mode,
-        iceServers: buildIceServers(),
-        sendSignal: (event, payload) => {
-          void sendCallSignal(event, {
-            ...payload,
-            toId: peerIdRef.current,
-          });
-        },
-        callbacks: {
-          onStateChange: (state) => {
-            setCallState(state);
-            if (state === 'off') {
-              setOutgoingMode(null);
-              setSpeakerOn(false);
-              setLocalStreamUrl(null);
-              setRemoteStreamUrl(null);
-              if (callRef.current === client) {
-                callRef.current = null;
+      const initPromise: Promise<DmWebRTCCall | null> = (async () => {
+        const client = new DmWebRTCCall({
+          conversationId: conversationIdRef.current!,
+          userId: userIdRef.current!,
+          mediaMode: mode,
+          iceServers: buildIceServers(),
+          sendSignal: (event, payload) => {
+            void sendCallSignal(event, {
+              ...payload,
+              toId: peerIdRef.current,
+            });
+          },
+          callbacks: {
+            onStateChange: (state) => {
+              setCallState(state);
+              if (state === 'reconnecting' || state === 'off') {
+                void sendCallSignal('call-state', {
+                  conversationId: conversationIdRef.current,
+                  fromId: userIdRef.current,
+                  toId: peerIdRef.current,
+                  state,
+                });
               }
-              void stopCallAudio();
-            }
+              if (state === 'off') {
+                setOutgoingMode(null);
+                setSpeakerOn(false);
+                setLocalStreamUrl(null);
+                setRemoteStreamUrl(null);
+                if (callRef.current === client) {
+                  callRef.current = null;
+                }
+                void stopCallAudio();
+              }
+            },
+            onLocalStream: (stream) => {
+              setLocalStreamUrl(getStreamUrl(stream));
+            },
+            onRemoteStream: (stream) => {
+              setRemoteStreamUrl(getStreamUrl(stream));
+            },
+            onError: (message) => {
+              showAlert('Call failed', message);
+            },
           },
-          onLocalStream: (stream) => {
-            setLocalStreamUrl(getStreamUrl(stream));
-          },
-          onRemoteStream: (stream) => {
-            setRemoteStreamUrl(getStreamUrl(stream));
-          },
-          onError: (message) => {
-            showAlert('Call failed', message);
-          },
-        },
-      });
+        });
 
-      await client.init();
-      await startCallAudio(mode);
-      const defaultSpeaker = mode === 'video';
-      await setSpeaker(defaultSpeaker);
-      setSpeakerOn(defaultSpeaker);
-      callRef.current = client;
-      return client;
+        await client.init();
+        await startCallAudio(mode);
+        const defaultSpeaker = mode === 'video';
+        await setSpeaker(defaultSpeaker);
+        setSpeakerOn(defaultSpeaker);
+        callRef.current = client;
+        return client;
+      })();
+
+      callInitPromiseRef.current = initPromise;
+      try {
+        return await initPromise;
+      } finally {
+        if (callInitPromiseRef.current === initPromise) {
+          callInitPromiseRef.current = null;
+        }
+      }
     },
     [buildIceServers, sendCallSignal],
   );
@@ -505,6 +528,22 @@ export function ChatThreadScreen() {
           if (data.toId && data.toId !== userIdRef.current) return;
           if (data.conversationId !== conversationIdRef.current) return;
           await endCall(false);
+        })();
+      })
+      .on('broadcast', { event: 'call-state' }, ({ payload }) => {
+        void (async () => {
+          const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
+          if (!data) return;
+          if (data.toId && data.toId !== userIdRef.current) return;
+          if (data.conversationId !== conversationIdRef.current) return;
+
+          if (data.state === 'reconnecting') {
+            setCallState('reconnecting');
+            return;
+          }
+          if (data.state === 'off') {
+            await endCall(false);
+          }
         })();
       })
       .on('broadcast', { event: 'call-mute' }, ({ payload }) => {
