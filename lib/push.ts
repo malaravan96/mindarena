@@ -86,3 +86,21 @@ export async function notifyIncomingMatchCall(matchId: string, calleeId: string,
     },
   });
 }
+
+export async function notifyIncomingDmCall(
+  conversationId: string,
+  calleeId: string,
+  callerName: string,
+  mode: 'audio' | 'video',
+) {
+  if (!conversationId || !calleeId || !callerName || !mode) return;
+  const { error } = await supabase.functions.invoke('notify-incoming-dm-call', {
+    body: {
+      conversation_id: conversationId,
+      callee_id: calleeId,
+      caller_name: callerName,
+      mode,
+    },
+  });
+  if (error) throw error;
+}

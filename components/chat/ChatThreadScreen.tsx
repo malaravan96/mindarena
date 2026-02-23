@@ -29,7 +29,7 @@ import {
   isEncryptedEnvelope,
   isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
-import { notifyDmMessage } from '@/lib/push';
+import { notifyDmMessage, notifyIncomingDmCall } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
@@ -641,6 +641,9 @@ export function ChatThreadScreen() {
       showAlert('Call failed', 'Unable to send encrypted call invite.');
       return;
     }
+    void notifyIncomingDmCall(conversationId, peerId, selfName, mode).catch((error) => {
+      console.warn('DM call push notify failed', error);
+    });
 
     clearOutgoingTimer();
     callInviteTimeoutRef.current = setTimeout(() => {
