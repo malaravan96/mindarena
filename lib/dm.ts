@@ -1,6 +1,12 @@
 import { supabase } from '@/lib/supabase';
 import type { DmConversation, DmMessage, Profile } from '@/lib/types';
-import { decryptDmMessageBody, encryptDmMessageBody, ensureDmE2eeReady, isEncryptedEnvelope } from '@/lib/dmE2ee';
+import {
+  decryptDmMessageBody,
+  encryptDmMessageBody,
+  ensureDmE2eeReady,
+  isEncryptedEnvelope,
+  isPeerE2eeNotReadyError,
+} from '@/lib/dmE2ee';
 
 type ConversationRow = {
   id: string;
@@ -252,16 +258,23 @@ export async function sendMessage(conversationId: string, body: string) {
   if (!conversation) throw new Error('Conversation not found');
 
   const peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
-  const encryptedBody = await encryptDmMessageBody({
-    conversationId,
-    userId: uid,
-    peerId,
-    body: text,
-  });
+  let messageBody = text;
+  try {
+    messageBody = await encryptDmMessageBody({
+      conversationId,
+      userId: uid,
+      peerId,
+      body: text,
+    });
+  } catch (error) {
+    if (!isPeerE2eeNotReadyError(error)) throw error;
+    // Compatibility path: allow plaintext messages until the peer publishes an E2EE key.
+    messageBody = text;
+  }
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .insert({ conversation_id: conversationId, sender_id: uid, body: encryptedBody })
+    .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody })
     .select('id, conversation_id, sender_id, body, created_at')
     .maybeSingle<DmMessage>();
 

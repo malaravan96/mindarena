@@ -27,6 +27,7 @@ import {
   encryptDmCallPayload,
   ensureDmE2eeReady,
   isEncryptedEnvelope,
+  isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
 import { notifyDmMessage } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
@@ -145,6 +146,9 @@ export function ChatThreadScreen() {
     const resolvedPeerId = resolveSignalPeerId(payload);
     if (!channel || !uid || !convId || !resolvedPeerId) return false;
 
+    const fromId = typeof payload.fromId === 'string' ? payload.fromId : uid;
+    const toId = typeof payload.toId === 'string' ? payload.toId : resolvedPeerId;
+
     try {
       const envelope = await encryptDmCallPayload({
         conversationId: convId,
@@ -157,14 +161,32 @@ export function ChatThreadScreen() {
         event,
         payload: {
           conversationId: convId,
-          fromId: typeof payload.fromId === 'string' ? payload.fromId : uid,
-          toId: typeof payload.toId === 'string' ? payload.toId : resolvedPeerId,
+          fromId,
+          toId,
           enc: envelope,
           v: 1,
         },
       });
       return true;
     } catch (error) {
+      if (isPeerE2eeNotReadyError(error)) {
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event,
+            payload: {
+              ...payload,
+              conversationId: convId,
+              fromId,
+              toId,
+            },
+          });
+          return true;
+        } catch (fallbackError) {
+          console.warn('Failed to send fallback call signal', fallbackError);
+          return false;
+        }
+      }
       console.warn('Failed to send encrypted call signal', error);
       return false;
     }

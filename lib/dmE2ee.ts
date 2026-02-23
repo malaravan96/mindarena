@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 const ENVELOPE_PREFIX = 'e2ee:v1';
 const PRIVATE_KEY_PREFIX = 'dm_e2ee_private_key_v1';
 const CONTEXT_PREFIX = 'mindarena-dm-e2ee-v1';
+const PEER_NOT_READY_ERROR = 'Peer is not ready for encrypted chat yet.';
 
 type LocalKeyPair = {
   publicKey: Uint8Array;
@@ -75,7 +76,11 @@ async function getRandomBytes(length: number) {
 }
 
 function secureKeyForUser(userId: string) {
-  return `${PRIVATE_KEY_PREFIX}:${userId}`;
+  const normalizedUserId = userId.trim().replace(/[^A-Za-z0-9._-]/g, '_');
+  if (!normalizedUserId) {
+    throw new Error('Invalid user id for local encryption key');
+  }
+  return `${PRIVATE_KEY_PREFIX}_${normalizedUserId}`;
 }
 
 async function publishPublicKey(userId: string, publicKeyHex: string) {
@@ -159,7 +164,7 @@ async function getPublicKey(userId: string): Promise<Uint8Array> {
     .maybeSingle<{ public_key: string }>();
 
   if (error || !data?.public_key) {
-    throw new Error('Peer is not ready for encrypted chat yet.');
+    throw new Error(PEER_NOT_READY_ERROR);
   }
 
   const key = fromHex(data.public_key);
@@ -181,6 +186,13 @@ async function deriveConversationKey(conversationId: string, userId: string, pee
 
 export function isEncryptedEnvelope(value: string) {
   return value.startsWith(`${ENVELOPE_PREFIX}:`);
+}
+
+export function isPeerE2eeNotReadyError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message === PEER_NOT_READY_ERROR || error.message.includes(PEER_NOT_READY_ERROR))
+  );
 }
 
 export async function ensureDmE2eeReady(userId: string) {
