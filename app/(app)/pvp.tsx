@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { getItem, setItem } from '@/lib/storage';
 import { notifyIncomingMatchCall } from '@/lib/push';
+import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import { PvpWebRTCCall } from '@/lib/webrtcCall';
 import type { CallUiState } from '@/lib/types';
 import { Button } from '@/components/Button';
@@ -133,6 +134,7 @@ export default function PvpScreen() {
   // Live call state
   const [callState, setCallState] = useState<CallUiState>('off');
   const [callMuted, setCallMuted] = useState(false);
+  const [callSpeakerOn, setCallSpeakerOn] = useState(true);
   const [opponentMuted, setOpponentMuted] = useState(false);
 
   // Refs for channels and timers
@@ -396,6 +398,8 @@ export default function PvpScreen() {
           }
           if (state === 'off') {
             setCallMuted(false);
+            setCallSpeakerOn(true);
+            void stopCallAudio();
           }
         },
         onError: () => {
@@ -438,8 +442,14 @@ export default function PvpScreen() {
     if (Platform.OS === 'web') return;
     if (callRef.current) return;
 
+    await startCallAudio('audio');
+    await setSpeaker(callSpeakerOn);
+
     const client = await ensureLiveCallClient();
-    if (!client) return;
+    if (!client) {
+      await stopCallAudio();
+      return;
+    }
 
     setCallState('connecting');
     if (isHostRef.current) {
@@ -471,6 +481,7 @@ export default function PvpScreen() {
     const active = callRef.current;
     callRef.current = null;
     setCallMuted(false);
+    setCallSpeakerOn(true);
     setOpponentMuted(false);
     setCallState('off');
 
@@ -482,6 +493,8 @@ export default function PvpScreen() {
       await updateCallSession(failed ? 'failed' : 'ended');
       callSessionIdRef.current = null;
     }
+
+    await stopCallAudio();
   }
 
   async function toggleCallMute() {
@@ -492,6 +505,15 @@ export default function PvpScreen() {
       matchId: matchIdRef.current,
       playerId: userIdRef.current,
       muted,
+    });
+  }
+
+  function toggleCallSpeaker() {
+    if (Platform.OS === 'web') return;
+    setCallSpeakerOn((prev) => {
+      const next = !prev;
+      void setSpeaker(next);
+      return next;
     });
   }
 
@@ -1631,6 +1653,26 @@ export default function PvpScreen() {
                   />
                   <Text style={[styles.callControlText, { color: callMuted ? colors.warning : colors.primary }]}>
                     {callMuted ? 'Unmute' : 'Mute'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={toggleCallSpeaker}
+                  style={[
+                    styles.callControlBtn,
+                    {
+                      backgroundColor: callSpeakerOn ? `${colors.primary}14` : colors.surfaceVariant,
+                      borderColor: callSpeakerOn ? `${colors.primary}30` : colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={callSpeakerOn ? 'volume-high-outline' : 'volume-low-outline'}
+                    size={16}
+                    color={callSpeakerOn ? colors.primary : colors.textSecondary}
+                  />
+                  <Text style={[styles.callControlText, { color: callSpeakerOn ? colors.primary : colors.textSecondary }]}>
+                    {callSpeakerOn ? 'Speaker' : 'Earpiece'}
                   </Text>
                 </Pressable>
 
