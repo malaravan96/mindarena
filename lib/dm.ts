@@ -8,6 +8,8 @@ import {
   isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
 
+const DM_E2EE_ENABLED = false;
+
 type ConversationRow = {
   id: string;
   user_a: string;
@@ -79,11 +81,13 @@ export async function getOrCreateConversation(peerUserId: string) {
 }
 
 export async function listConversations(userId: string): Promise<DmConversation[]> {
-  let e2eeReady = true;
-  try {
-    await ensureDmE2eeReady(userId);
-  } catch {
-    e2eeReady = false;
+  let e2eeReady = DM_E2EE_ENABLED;
+  if (DM_E2EE_ENABLED) {
+    try {
+      await ensureDmE2eeReady(userId);
+    } catch {
+      e2eeReady = false;
+    }
   }
 
   const { data: rows, error } = await supabase
@@ -187,11 +191,13 @@ export async function listMessages(
 ): Promise<DmMessage[]> {
   const uid = options?.userId ?? (await getCurrentUserId());
   if (!uid) return [];
-  let e2eeReady = true;
-  try {
-    await ensureDmE2eeReady(uid);
-  } catch {
-    e2eeReady = false;
+  let e2eeReady = DM_E2EE_ENABLED;
+  if (DM_E2EE_ENABLED) {
+    try {
+      await ensureDmE2eeReady(uid);
+    } catch {
+      e2eeReady = false;
+    }
   }
 
   const { data, error } = await supabase
@@ -234,7 +240,7 @@ export async function listMessages(
         });
         return { ...row, body };
       } catch {
-        return { ...row, body: '[Unable to decrypt message]' };
+        return { ...row, body: '[Encrypted message]' };
       }
     }),
   );
@@ -245,7 +251,15 @@ export async function listMessages(
 export async function sendMessage(conversationId: string, body: string) {
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
-  await ensureDmE2eeReady(uid);
+  let canEncrypt = DM_E2EE_ENABLED;
+  if (DM_E2EE_ENABLED) {
+    try {
+      await ensureDmE2eeReady(uid);
+    } catch {
+      // Keep DM usable even when key publish/storage is unavailable.
+      canEncrypt = false;
+    }
+  }
 
   const text = body.trim();
   if (!text) throw new Error('Message cannot be empty');
@@ -259,18 +273,22 @@ export async function sendMessage(conversationId: string, body: string) {
 
   const peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
   let messageBody = text;
-  try {
-    messageBody = await encryptDmMessageBody({
-      conversationId,
-      userId: uid,
-      peerId,
-      body: text,
-      forceRefreshPeerKey: true,
-    });
-  } catch (error) {
-    if (!isPeerE2eeNotReadyError(error)) throw error;
-    // Compatibility path: allow plaintext messages until the peer publishes an E2EE key.
-    messageBody = text;
+  if (canEncrypt) {
+    try {
+      messageBody = await encryptDmMessageBody({
+        conversationId,
+        userId: uid,
+        peerId,
+        body: text,
+        forceRefreshPeerKey: true,
+      });
+    } catch (error) {
+      if (!isPeerE2eeNotReadyError(error)) {
+        console.warn('DM encrypt failed; falling back to plaintext', error);
+      }
+      // Compatibility path: allow plaintext messages when E2EE is not available.
+      messageBody = text;
+    }
   }
 
   const { data, error } = await supabase

@@ -42,6 +42,7 @@ type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
 
 const OUTGOING_CALL_TIMEOUT_MS = 30_000;
 const VIDEO_STAGE_HEIGHT = 220;
+const DM_SIGNAL_E2EE_ENABLED = false;
 
 function getStreamUrl(stream: any | null) {
   if (!stream || typeof stream.toURL !== 'function') return null;
@@ -150,6 +151,29 @@ export function ChatThreadScreen() {
     const fromId = typeof payload.fromId === 'string' ? payload.fromId : uid;
     const toId = typeof payload.toId === 'string' ? payload.toId : resolvedPeerId;
 
+    const sendPlain = async () => {
+      await channel.send({
+        type: 'broadcast',
+        event,
+        payload: {
+          ...payload,
+          conversationId: convId,
+          fromId,
+          toId,
+        },
+      });
+    };
+
+    if (!DM_SIGNAL_E2EE_ENABLED) {
+      try {
+        await sendPlain();
+        return true;
+      } catch (error) {
+        console.warn('Failed to send plaintext call signal', error);
+        return false;
+      }
+    }
+
     try {
       const envelope = await encryptDmCallPayload({
         conversationId: convId,
@@ -162,6 +186,7 @@ export function ChatThreadScreen() {
         type: 'broadcast',
         event,
         payload: {
+          ...payload,
           conversationId: convId,
           fromId,
           toId,
@@ -171,32 +196,23 @@ export function ChatThreadScreen() {
       });
       return true;
     } catch (error) {
-      if (isPeerE2eeNotReadyError(error)) {
-        try {
-          await channel.send({
-            type: 'broadcast',
-            event,
-            payload: {
-              ...payload,
-              conversationId: convId,
-              fromId,
-              toId,
-            },
-          });
-          return true;
-        } catch (fallbackError) {
-          console.warn('Failed to send fallback call signal', fallbackError);
-          return false;
-        }
+      if (!isPeerE2eeNotReadyError(error)) {
+        console.warn('Failed to send encrypted call signal; trying plaintext', error);
       }
-      console.warn('Failed to send encrypted call signal', error);
-      return false;
+      try {
+        await sendPlain();
+        return true;
+      } catch (fallbackError) {
+        console.warn('Failed to send fallback call signal', fallbackError);
+        return false;
+      }
     }
   }, [resolveSignalPeerId]);
 
   const decodeCallSignalPayload = useCallback(
     async (payload: Record<string, unknown>) => {
       if (typeof payload.enc !== 'string') return payload;
+      if (!DM_SIGNAL_E2EE_ENABLED) return payload;
 
       const uid = userIdRef.current;
       const convId =
@@ -215,7 +231,8 @@ export function ChatThreadScreen() {
         });
         return { ...payload, ...decrypted };
       } catch {
-        return null;
+        // Compatibility path: if sender included plaintext fields, keep processing.
+        return payload;
       }
     },
     [resolveSignalPeerId],
@@ -411,7 +428,7 @@ export function ChatThreadScreen() {
                   body: raw.body,
                 });
               } catch {
-                body = '[Unable to decrypt message]';
+                body = '[Encrypted message]';
               }
             }
 
@@ -583,6 +600,12 @@ export function ChatThreadScreen() {
     setSending(true);
     try {
       const row = await sendMessage(conversationId, body);
+      setMessages((prev) => {
+        if (prev.some((msg) => msg.id === row.id)) return prev;
+        const next = [...prev, row];
+        next.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        return next;
+      });
       setInput('');
       void notifyDmMessage(row.id).catch((error) => {
         console.warn('DM push notify failed', error);
