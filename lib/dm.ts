@@ -7,6 +7,7 @@ import {
   isEncryptedEnvelope,
   isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
+import { getAcceptedPeerIds, getBlockedIds, isBlocked } from '@/lib/connections';
 
 const DM_E2EE_ENABLED = false;
 
@@ -36,6 +37,14 @@ export async function getOrCreateConversation(peerUserId: string) {
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
   if (uid === peerUserId) throw new Error('Cannot message yourself');
+
+  // Block check
+  const blocked = await isBlocked(uid, peerUserId);
+  if (blocked) throw new Error('Cannot message this user — blocked');
+
+  // Connection check — only accepted connections can message
+  const acceptedPeers = await getAcceptedPeerIds(uid);
+  if (!acceptedPeers.has(peerUserId)) throw new Error('You must be connected to message this user');
 
   const { data: existing } = await supabase
     .from('dm_conversations')
@@ -151,8 +160,19 @@ export async function listConversations(userId: string): Promise<DmConversation[
     }
   }
 
+  // Filter out blocked and non-connected peers
+  const [blockedIds, acceptedPeers] = await Promise.all([
+    getBlockedIds(userId),
+    getAcceptedPeerIds(userId),
+  ]);
+
   const output = await Promise.all(
-    conversations.map(async (c) => {
+    conversations
+      .filter((c) => {
+        const pid = c.user_a === userId ? c.user_b : c.user_a;
+        return !blockedIds.has(pid) && acceptedPeers.has(pid);
+      })
+      .map(async (c) => {
       const peerId = c.user_a === userId ? c.user_b : c.user_a;
       const peer = profileById.get(peerId);
       const lastRaw = lastByConversation.get(c.id)?.body ?? '';
@@ -272,6 +292,11 @@ export async function sendMessage(conversationId: string, body: string) {
   if (!conversation) throw new Error('Conversation not found');
 
   const peerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
+
+  // Block check
+  const blocked = await isBlocked(uid, peerId);
+  if (blocked) throw new Error('Cannot send message — user is blocked');
+
   let messageBody = text;
   if (canEncrypt) {
     try {
@@ -328,12 +353,16 @@ export async function getTotalDmUnread(userId: string) {
 }
 
 export async function listMessageTargets(userId: string): Promise<Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>[]> {
+  // Only return accepted connections
+  const acceptedPeers = await getAcceptedPeerIds(userId);
+  if (acceptedPeers.size === 0) return [];
+
+  const peerArray = Array.from(acceptedPeers);
   const { data, error } = await supabase
     .from('profiles')
     .select('id, username, display_name, avatar_url')
-    .neq('id', userId)
-    .order('total_points', { ascending: false })
-    .limit(80);
+    .in('id', peerArray)
+    .order('total_points', { ascending: false });
 
   if (error || !data) return [];
   return data;

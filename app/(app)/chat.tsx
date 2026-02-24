@@ -10,7 +10,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, getOrCreateConversation, listConversations, listMessageTargets } from '@/lib/dm';
 import { supabase } from '@/lib/supabase';
-import type { DmConversation } from '@/lib/types';
+import type { ConnectionWithProfile, DmConversation } from '@/lib/types';
+import { listConnections, acceptChatRequest, declineChatRequest } from '@/lib/connections';
 
 type MessageTarget = {
   id: string;
@@ -26,6 +27,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<DmConversation[]>([]);
   const [targets, setTargets] = useState<MessageTarget[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<ConnectionWithProfile[]>([]);
 
   const titleCount = useMemo(
     () => conversations.reduce((sum, item) => sum + item.unread_count, 0),
@@ -35,12 +37,15 @@ export default function ChatScreen() {
   const loadData = useCallback(async (uid: string) => {
     setLoading(true);
     try {
-      const [rows, people] = await Promise.all([
+      const [rows, people, pending] = await Promise.all([
         listConversations(uid),
         listMessageTargets(uid),
+        listConnections(uid, 'pending'),
       ]);
       setConversations(rows);
       setTargets(people);
+      // Only show incoming pending requests (where current user is the target)
+      setPendingRequests(pending.filter((c) => c.target_id === uid));
     } finally {
       setLoading(false);
     }
@@ -61,6 +66,11 @@ export default function ChatScreen() {
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'dm_messages' },
+          () => loadData(uid),
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_connections' },
           () => loadData(uid),
         )
         .subscribe();
@@ -113,6 +123,58 @@ export default function ChatScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {pendingRequests.length > 0 && (
+            <Card style={styles.blockCard} padding="md">
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Chat Requests</Text>
+              {pendingRequests.map((req) => (
+                <View
+                  key={req.id}
+                  style={[styles.row, { borderColor: `${colors.secondary}30`, backgroundColor: `${colors.secondary}08` }]}
+                >
+                  {req.peer_avatar_url ? (
+                    <Image source={{ uri: req.peer_avatar_url }} style={styles.avatarImage} />
+                  ) : (
+                    <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
+                      <Text style={[styles.avatarText, { color: colors.secondary }]}>
+                        {(req.peer_name || 'P').slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.rowMain}>
+                    <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
+                      {req.peer_name}
+                    </Text>
+                    <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>Wants to connect</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+                    <Pressable
+                      onPress={async () => {
+                        try {
+                          await acceptChatRequest(req.id);
+                          if (userId) await loadData(userId);
+                        } catch { /* ignore */ }
+                      }}
+                      style={[styles.requestBtn, { backgroundColor: colors.correct }]}
+                    >
+                      <Text style={styles.requestBtnText}>Accept</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={async () => {
+                        try {
+                          await declineChatRequest(req.id);
+                          if (userId) await loadData(userId);
+                        } catch { /* ignore */ }
+                      }}
+                      style={[styles.requestBtn, { backgroundColor: colors.wrong }]}
+                    >
+                      <Text style={styles.requestBtnText}>Decline</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </Card>
+          )}
+
           <Card style={styles.blockCard} padding="md">
             <Text style={[styles.sectionLabel, { color: colors.text }]}>Recent Conversations</Text>
             {conversations.length === 0 ? (
@@ -161,7 +223,7 @@ export default function ChatScreen() {
           </Card>
 
           <Card style={styles.blockCard} padding="md">
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Start New Chat</Text>
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>Connected Players</Text>
             {targets.map((peer) => (
               <Pressable
                 key={peer.id}
@@ -257,4 +319,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: fontWeight.bold },
+  requestBtn: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestBtnText: { color: '#fff', fontSize: fontSize.xs, fontWeight: fontWeight.bold },
 });

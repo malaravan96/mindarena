@@ -21,6 +21,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, listMessages, markConversationRead, sendMessage } from '@/lib/dm';
+import { blockUser, unblockUser, isBlocked as checkIsBlocked } from '@/lib/connections';
 import {
   decryptDmCallPayload,
   decryptDmMessageBody,
@@ -31,7 +32,7 @@ import {
 } from '@/lib/dmE2ee';
 import { notifyDmMessage, notifyIncomingDmCall } from '@/lib/push';
 import { supabase } from '@/lib/supabase';
-import { showAlert } from '@/lib/alert';
+import { showAlert, showConfirm } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import type { CallUiState, DmMessage } from '@/lib/types';
@@ -63,6 +64,7 @@ export function ChatThreadScreen() {
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [isBlockedState, setIsBlockedState] = useState(false);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
   const [outgoingMode, setOutgoingMode] = useState<CallMode | null>(null);
@@ -368,6 +370,10 @@ export function ChatThreadScreen() {
       if (!conversation) return;
       const nextPeerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
       setPeerId(nextPeerId);
+
+      // Check block status
+      const blocked = await checkIsBlocked(uid, nextPeerId);
+      setIsBlockedState(blocked);
 
       const [rows, , { data: profile }] = await Promise.all([
         listMessages(conversationId, { userId: uid, peerId: nextPeerId }),
@@ -800,11 +806,11 @@ export function ChatThreadScreen() {
         <View style={styles.headerActions}>
           <Pressable
             onPress={() => void startCall('audio')}
-            disabled={callStartDisabled}
+            disabled={callStartDisabled || isBlockedState}
             style={[
               styles.headerActionBtn,
               {
-                opacity: callStartDisabled ? 0.45 : 1,
+                opacity: callStartDisabled || isBlockedState ? 0.45 : 1,
                 backgroundColor: `${colors.primary}14`,
               },
             ]}
@@ -813,16 +819,54 @@ export function ChatThreadScreen() {
           </Pressable>
           <Pressable
             onPress={() => void startCall('video')}
-            disabled={callStartDisabled}
+            disabled={callStartDisabled || isBlockedState}
             style={[
               styles.headerActionBtn,
               {
-                opacity: callStartDisabled ? 0.45 : 1,
+                opacity: callStartDisabled || isBlockedState ? 0.45 : 1,
                 backgroundColor: `${colors.secondary}14`,
               },
             ]}
           >
             <Ionicons name="videocam-outline" size={16} color={colors.secondary} />
+          </Pressable>
+          <Pressable
+            onPress={async () => {
+              if (!peerId) return;
+              if (isBlockedState) {
+                const confirmed = await showConfirm(
+                  'Unblock User',
+                  `Unblock ${peerName}? You'll need to reconnect before messaging.`,
+                  'Unblock',
+                );
+                if (!confirmed) return;
+                try {
+                  await unblockUser(peerId);
+                  setIsBlockedState(false);
+                } catch { /* ignore */ }
+              } else {
+                const confirmed = await showConfirm(
+                  'Block User',
+                  `Block ${peerName}? You won't be able to send or receive messages.`,
+                  'Block',
+                );
+                if (!confirmed) return;
+                try {
+                  await blockUser(peerId);
+                  setIsBlockedState(true);
+                } catch { /* ignore */ }
+              }
+            }}
+            style={[
+              styles.headerActionBtn,
+              { backgroundColor: isBlockedState ? `${colors.warning}14` : `${colors.wrong}14` },
+            ]}
+          >
+            <Ionicons
+              name={isBlockedState ? 'ban' : 'ban-outline'}
+              size={16}
+              color={isBlockedState ? colors.warning : colors.wrong}
+            />
           </Pressable>
         </View>
       </View>
@@ -1038,7 +1082,7 @@ export function ChatThreadScreen() {
             <TextInput
               value={input}
               onChangeText={setInput}
-              placeholder="Type a message..."
+              placeholder={isBlockedState ? 'Blocked' : 'Type a message...'}
               placeholderTextColor={colors.textTertiary}
               style={[
                 styles.input,
@@ -1048,17 +1092,17 @@ export function ChatThreadScreen() {
                   backgroundColor: colors.surfaceVariant,
                 },
               ]}
-              editable={!sending}
+              editable={!sending && !isBlockedState}
               onSubmitEditing={onSend}
               returnKeyType="send"
             />
             <Pressable
               onPress={onSend}
-              disabled={sending || !input.trim()}
+              disabled={sending || !input.trim() || isBlockedState}
               style={[
                 styles.sendBtn,
                 {
-                  backgroundColor: sending || !input.trim() ? colors.border : colors.primary,
+                  backgroundColor: sending || !input.trim() || isBlockedState ? colors.border : colors.primary,
                 },
               ]}
             >

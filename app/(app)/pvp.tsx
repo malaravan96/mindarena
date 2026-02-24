@@ -22,7 +22,14 @@ import { getItem, setItem } from '@/lib/storage';
 import { notifyIncomingMatchCall } from '@/lib/push';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import { PvpWebRTCCall } from '@/lib/webrtcCall';
-import type { CallUiState } from '@/lib/types';
+import type { CallUiState, UserConnection } from '@/lib/types';
+import {
+  sendChatRequest as sendConnectRequest,
+  acceptChatRequest,
+  declineChatRequest,
+  listConnections,
+  getBlockedIds,
+} from '@/lib/connections';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -100,6 +107,14 @@ export default function PvpScreen() {
   const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
   const [loadingPlayers, setLoadingPlayers] = useState(true);
 
+  // Connection & block state
+  const [connectionMap, setConnectionMap] = useState<Map<string, UserConnection>>(new Map());
+  const [incomingRequests, setIncomingRequests] = useState<(UserConnection & { peer_name: string; peer_avatar_url?: string | null })[]>([]);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+
+  // Player search
+  const [playerSearch, setPlayerSearch] = useState('');
+
   // Invite state
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
   const [invitedPlayer, setInvitedPlayer] = useState<PlayerInfo | null>(null);
@@ -140,6 +155,7 @@ export default function PvpScreen() {
   // Refs for channels and timers
   const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
   const inviteChannelRef = useRef<RealtimeChannel | null>(null);
+  const connectionsChannelRef = useRef<RealtimeChannel | null>(null);
   const matchChannelRef = useRef<RealtimeChannel | null>(null);
   const chatChannelRef = useRef<RealtimeChannel | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -194,6 +210,18 @@ export default function PvpScreen() {
         // Join presence + invite channels once we have uid
         joinLobbyPresence(uid, profile?.username ?? 'Player');
         joinInviteChannel(uid);
+        fetchConnectionData(uid);
+
+        // Listen for connection changes in realtime
+        const connChannel = supabase
+          .channel(`pvp-connections-${uid}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'user_connections' },
+            () => { fetchConnectionData(uid); },
+          )
+          .subscribe();
+        connectionsChannelRef.current = connChannel;
       }
     })();
     loadStats();
@@ -242,9 +270,10 @@ export default function PvpScreen() {
     React.useCallback(() => {
       void refreshCurrentProfile();
       void fetchPlayers();
+      if (userId) void fetchConnectionData(userId);
       if (opponentId) void loadOpponentAvatar(opponentId);
       return undefined;
-    }, [opponentId]),
+    }, [opponentId, userId]),
   );
 
   // ── Data Loading ────────────────────────────────────────────────
@@ -287,6 +316,26 @@ export default function PvpScreen() {
       }
     } catch { /* ignore */ }
     setLoadingPlayers(false);
+  }
+
+  async function fetchConnectionData(uid: string) {
+    try {
+      const [allConnections, blocked] = await Promise.all([
+        listConnections(uid),
+        getBlockedIds(uid),
+      ]);
+      const map = new Map<string, UserConnection>();
+      const incoming: (UserConnection & { peer_name: string; peer_avatar_url?: string | null })[] = [];
+      for (const conn of allConnections) {
+        map.set(conn.peer_id, conn);
+        if (conn.status === 'pending' && conn.target_id === uid) {
+          incoming.push({ ...conn, peer_name: conn.peer_name, peer_avatar_url: conn.peer_avatar_url });
+        }
+      }
+      setConnectionMap(map);
+      setIncomingRequests(incoming);
+      setBlockedIds(blocked);
+    } catch { /* ignore */ }
   }
 
   async function refreshCurrentProfile() {
@@ -767,6 +816,10 @@ export default function PvpScreen() {
       supabase.removeChannel(inviteChannelRef.current);
       inviteChannelRef.current = null;
     }
+    if (connectionsChannelRef.current) {
+      supabase.removeChannel(connectionsChannelRef.current);
+      connectionsChannelRef.current = null;
+    }
   }
 
   function resetToLobby() {
@@ -1166,6 +1219,14 @@ export default function PvpScreen() {
   const playerList = players
     .filter((p) => p.id !== userId)
     .map((p) => ({ ...p, online: onlineIds.has(p.id) }))
+    .filter((p) => {
+      if (!playerSearch.trim()) return true;
+      const q = playerSearch.trim().toLowerCase();
+      return (
+        p.username.toLowerCase().includes(q) ||
+        (p.display_name?.toLowerCase().includes(q) ?? false)
+      );
+    })
     .sort((a, b) => (a.online === b.online ? 0 : a.online ? -1 : 1));
 
 
@@ -1233,6 +1294,49 @@ export default function PvpScreen() {
         </View>
       )}
 
+      {phase === 'lobby' && incomingRequests.length > 0 && incomingRequests.map((req) => (
+        <View
+          key={req.id}
+          style={[styles.inviteBanner, { borderColor: `${colors.secondary}35`, backgroundColor: `${colors.secondary}10` }]}
+        >
+          <View style={styles.inviteBannerContent}>
+            <View style={[styles.inviteIconWrap, { backgroundColor: `${colors.secondary}18` }]}>
+              <Ionicons name="person-add" size={18} color={colors.secondary} />
+            </View>
+            <View style={styles.inviteBannerText}>
+              <Text style={[styles.inviteBannerTitle, { color: colors.text }]}>Chat request</Text>
+              <Text style={[styles.inviteBannerFrom, { color: colors.textSecondary }]}>
+                {req.peer_name} wants to connect
+              </Text>
+            </View>
+          </View>
+          <View style={styles.inviteBannerActions}>
+            <Pressable
+              onPress={async () => {
+                try {
+                  await acceptChatRequest(req.id);
+                  if (userId) await fetchConnectionData(userId);
+                } catch { /* ignore */ }
+              }}
+              style={[styles.inviteBtn, { backgroundColor: colors.correct }]}
+            >
+              <Text style={styles.inviteBtnText}>Accept</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                try {
+                  await declineChatRequest(req.id);
+                  if (userId) await fetchConnectionData(userId);
+                } catch { /* ignore */ }
+              }}
+              style={[styles.inviteBtn, { backgroundColor: colors.wrong }]}
+            >
+              <Text style={styles.inviteBtnText}>Decline</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 760 : undefined }]}
@@ -1290,6 +1394,24 @@ export default function PvpScreen() {
               <Text style={[styles.onlineSummary, { color: colors.textSecondary }]}>{onlineCount} online</Text>
             </View>
 
+            <View style={[styles.searchRow, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}>
+              <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+              <TextInput
+                value={playerSearch}
+                onChangeText={setPlayerSearch}
+                placeholder="Search players..."
+                placeholderTextColor={colors.textTertiary}
+                style={[styles.searchInput, { color: colors.text }]}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {playerSearch.length > 0 && (
+                <Pressable onPress={() => setPlayerSearch('')}>
+                  <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                </Pressable>
+              )}
+            </View>
+
             {loadingPlayers ? (
               <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
             ) : playerList.length === 0 ? (
@@ -1300,83 +1422,125 @@ export default function PvpScreen() {
                 </View>
               </Card>
             ) : (
-              playerList.map((player) => (
-                <Pressable
-                  key={player.id}
-                  onPress={() => player.online && sendInvite(player)}
-                  disabled={!player.online}
-                  style={({ pressed }) => [
-                    styles.playerRow,
-                    {
-                      opacity: player.online ? 1 : 0.62,
-                      borderColor: player.online ? `${colors.primary}30` : colors.border,
-                      backgroundColor: pressed ? `${colors.primary}08` : colors.surface,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.playerAvatar,
-                      { backgroundColor: player.online ? `${colors.primary}16` : colors.surfaceVariant },
+              playerList.map((player) => {
+                const conn = connectionMap.get(player.id);
+                const isPlayerBlocked = blockedIds.has(player.id);
+                const isAccepted = conn?.status === 'accepted';
+                const isPendingOutgoing = conn?.status === 'pending' && conn.requester_id === userId;
+                const isPendingIncoming = conn?.status === 'pending' && conn.target_id === userId;
+                const canInvite = isAccepted && player.online && !isPlayerBlocked;
+
+                return (
+                  <Pressable
+                    key={player.id}
+                    onPress={() => canInvite && sendInvite(player)}
+                    disabled={!canInvite}
+                    style={({ pressed }) => [
+                      styles.playerRow,
+                      {
+                        opacity: isPlayerBlocked ? 0.4 : player.online ? 1 : 0.62,
+                        borderColor: canInvite ? `${colors.primary}30` : colors.border,
+                        backgroundColor: pressed && canInvite ? `${colors.primary}08` : colors.surface,
+                      },
                     ]}
                   >
-                    {player.avatar_url ? (
-                      <Image source={{ uri: player.avatar_url }} style={styles.playerAvatarImage} />
-                    ) : (
-                      <Text
-                        style={[
-                          styles.playerAvatarText,
-                          { color: player.online ? colors.primary : colors.textTertiary },
-                        ]}
-                      >
-                        {getInitials(player.display_name || player.username)}
-                      </Text>
-                    )}
-                  </View>
-
-                  <View style={styles.playerInfo}>
-                    <Text style={[styles.playerName, { color: colors.text }]}>
-                      {player.display_name || player.username}
-                    </Text>
-                    <View style={styles.playerMetaRow}>
-                      <Ionicons name="star" size={12} color={colors.warning} />
-                      <Text style={[styles.playerMeta, { color: colors.textSecondary }]}>
-                        {player.total_points} points
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.playerAction}>
                     <View
                       style={[
-                        styles.statusBadge,
-                        { backgroundColor: player.online ? `${colors.correct}16` : `${colors.textTertiary}16` },
+                        styles.playerAvatar,
+                        { backgroundColor: player.online ? `${colors.primary}16` : colors.surfaceVariant },
                       ]}
                     >
+                      {player.avatar_url ? (
+                        <Image source={{ uri: player.avatar_url }} style={styles.playerAvatarImage} />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.playerAvatarText,
+                            { color: player.online ? colors.primary : colors.textTertiary },
+                          ]}
+                        >
+                          {getInitials(player.display_name || player.username)}
+                        </Text>
+                      )}
+                    </View>
+
+                    <View style={styles.playerInfo}>
+                      <Text style={[styles.playerName, { color: colors.text }]}>
+                        {player.display_name || player.username}
+                      </Text>
+                      <View style={styles.playerMetaRow}>
+                        <Ionicons name="star" size={12} color={colors.warning} />
+                        <Text style={[styles.playerMeta, { color: colors.textSecondary }]}>
+                          {player.total_points} points
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.playerAction}>
                       <View
                         style={[
-                          styles.onlineDot,
-                          { backgroundColor: player.online ? colors.correct : colors.textTertiary },
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.statusLabel,
-                          { color: player.online ? colors.correct : colors.textSecondary },
+                          styles.statusBadge,
+                          { backgroundColor: player.online ? `${colors.correct}16` : `${colors.textTertiary}16` },
                         ]}
                       >
-                        {player.online ? 'Online' : 'Offline'}
-                      </Text>
-                    </View>
-                    {player.online && (
-                      <View style={[styles.battleAction, { backgroundColor: `${colors.primary}16` }]}>
-                        <Ionicons name="flash" size={13} color={colors.primary} />
-                        <Text style={[styles.battleActionText, { color: colors.primary }]}>Invite</Text>
+                        <View
+                          style={[
+                            styles.onlineDot,
+                            { backgroundColor: player.online ? colors.correct : colors.textTertiary },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.statusLabel,
+                            { color: player.online ? colors.correct : colors.textSecondary },
+                          ]}
+                        >
+                          {player.online ? 'Online' : 'Offline'}
+                        </Text>
                       </View>
-                    )}
-                  </View>
-                </Pressable>
-              ))
+                      {isPlayerBlocked ? null : canInvite ? (
+                        <View style={[styles.battleAction, { backgroundColor: `${colors.primary}16` }]}>
+                          <Ionicons name="flash" size={13} color={colors.primary} />
+                          <Text style={[styles.battleActionText, { color: colors.primary }]}>Invite</Text>
+                        </View>
+                      ) : isPendingOutgoing ? (
+                        <View style={[styles.battleAction, { backgroundColor: `${colors.textTertiary}16` }]}>
+                          <Ionicons name="time-outline" size={13} color={colors.textSecondary} />
+                          <Text style={[styles.battleActionText, { color: colors.textSecondary }]}>Requested</Text>
+                        </View>
+                      ) : isPendingIncoming ? (
+                        <Pressable
+                          onPress={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              await acceptChatRequest(conn!.id);
+                              if (userId) await fetchConnectionData(userId);
+                            } catch { /* ignore */ }
+                          }}
+                          style={[styles.battleAction, { backgroundColor: `${colors.correct}16` }]}
+                        >
+                          <Ionicons name="checkmark" size={13} color={colors.correct} />
+                          <Text style={[styles.battleActionText, { color: colors.correct }]}>Accept</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          onPress={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              await sendConnectRequest(player.id);
+                              if (userId) await fetchConnectionData(userId);
+                            } catch { /* ignore */ }
+                          }}
+                          style={[styles.battleAction, { backgroundColor: `${colors.secondary}16` }]}
+                        >
+                          <Ionicons name="person-add-outline" size={13} color={colors.secondary} />
+                          <Text style={[styles.battleActionText, { color: colors.secondary }]}>Connect</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  </Pressable>
+                );
+              })
             )}
 
             {!userId && (
@@ -1979,6 +2143,21 @@ const styles = StyleSheet.create({
   },
   sectionLabel: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
   onlineSummary: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: Platform.OS === 'ios' ? spacing.sm : 0,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    paddingVertical: spacing.sm,
+  },
   emptyText: { fontSize: fontSize.sm, textAlign: 'center' },
 
   playerRow: {

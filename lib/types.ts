@@ -93,6 +93,31 @@ export interface PvpCallSession {
 
 export type CallUiState = 'off' | 'connecting' | 'live' | 'reconnecting';
 
+// Connection & block types
+export type ConnectionStatus = 'pending' | 'accepted' | 'declined';
+
+export interface UserConnection {
+  id: string;
+  requester_id: string;
+  target_id: string;
+  status: ConnectionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectionWithProfile extends UserConnection {
+  peer_id: string;
+  peer_name: string;
+  peer_avatar_url?: string | null;
+}
+
+export interface BlockedUser {
+  id: string;
+  blocker_id: string;
+  blocked_id: string;
+  created_at: string;
+}
+
 // Form types
 export interface RegisterFormData {
   email: string;
