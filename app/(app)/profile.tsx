@@ -8,12 +8,18 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
 import { getCurrentUserId, getTotalDmUnread } from '@/lib/dm';
+import { getCurrentLevelProgress } from '@/lib/xp';
+import { getUserAchievements } from '@/lib/achievements';
+import { getUserTeam } from '@/lib/teams';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Card } from '@/components/Card';
+import { XPProgressBar } from '@/components/rewards/XPProgressBar';
+import { BadgeGrid } from '@/components/rewards/BadgeGrid';
 import { ThemePicker } from '@/components/ThemePicker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
+import type { AvailableBadge, Team } from '@/lib/types';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -35,12 +41,13 @@ type PuzzleAttempt = {
   puzzle_type: string;
 };
 
-type Achievement = {
-  id: string;
+type LevelInfo = {
+  level: number;
+  xp: number;
+  xpForCurrent: number;
+  xpForNext: number;
+  progress: number;
   title: string;
-  description: string;
-  icon: IconName;
-  unlocked: boolean;
 };
 
 const modeOptions = [
@@ -62,7 +69,11 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [recentAttempts, setRecentAttempts] = useState<PuzzleAttempt[]>([]);
-  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [badges, setBadges] = useState<AvailableBadge[]>([]);
+  const [earnedIds, setEarnedIds] = useState<Set<string>>(new Set());
+  const [levelInfo, setLevelInfo] = useState<LevelInfo | null>(null);
+  const [userTitle, setUserTitle] = useState<string | null>(null);
+  const [myTeam, setMyTeam] = useState<Team | null>(null);
   const [dmUnread, setDmUnread] = useState(0);
   const [stats, setStats] = useState<UserStats>({
     total_attempts: 0,
@@ -175,54 +186,19 @@ export default function Profile() {
         setRecentAttempts([]);
       }
 
-      const totalCorrect = correctAttempts.length;
-      const streak = profileData?.streak_count ?? 0;
-      const fastSolve = bestTime > 0 && bestTime < 10_000;
-
-      setAchievements([
-        {
-          id: 'first-solve',
-          title: 'First Solve',
-          description: 'Solve your first puzzle',
-          icon: 'flag-outline',
-          unlocked: totalCorrect >= 1,
-        },
-        {
-          id: 'five-streak',
-          title: '5-Day Streak',
-          description: 'Maintain a 5-day solving streak',
-          icon: 'flame-outline',
-          unlocked: streak >= 5,
-        },
-        {
-          id: 'speed-demon',
-          title: 'Speed Demon',
-          description: 'Solve a puzzle in under 10 seconds',
-          icon: 'flash-outline',
-          unlocked: fastSolve,
-        },
-        {
-          id: 'ten-correct',
-          title: 'Sharp Mind',
-          description: 'Get 10 puzzles correct',
-          icon: 'bulb-outline',
-          unlocked: totalCorrect >= 10,
-        },
-        {
-          id: 'perfectionist',
-          title: 'Perfectionist',
-          description: 'Achieve 100% accuracy (min 5 attempts)',
-          icon: 'diamond-outline',
-          unlocked: allAttempts.length >= 5 && totalCorrect === allAttempts.length,
-        },
-        {
-          id: 'dedicated',
-          title: 'Dedicated',
-          description: 'Attempt 20 puzzles',
-          icon: 'trophy-outline',
-          unlocked: allAttempts.length >= 20,
-        },
+      // Load dynamic achievements, level info, and team
+      const [earned, lvlInfo, team] = await Promise.all([
+        getUserAchievements(uid),
+        getCurrentLevelProgress(uid),
+        getUserTeam(uid),
       ]);
+
+      setBadges(earned.map((e) => e.badge));
+      setEarnedIds(new Set(earned.map((e) => e.badge_id)));
+      setLevelInfo(lvlInfo);
+      setUserTitle(lvlInfo.title);
+      setMyTeam(team);
+
       await loadDmUnread();
     } catch (e: any) {
       console.error('Profile load error:', e);
@@ -424,7 +400,9 @@ export default function Profile() {
                 ]}
               >
                 <Ionicons name="sparkles" size={13} color={colors.primary} />
-                <Text style={[styles.identityPillText, { color: colors.primary }]}>Puzzle Challenger</Text>
+                <Text style={[styles.identityPillText, { color: colors.primary }]}>
+                  {userTitle ? `Lv.${levelInfo?.level ?? 1} ${userTitle}` : 'Puzzle Challenger'}
+                </Text>
               </View>
               <Text style={[styles.heroName, { color: colors.text }]} numberOfLines={1}>
                 {profileName}
@@ -458,6 +436,31 @@ export default function Profile() {
               colors={colors}
             />
           </View>
+
+          {levelInfo && (
+            <View style={{ marginTop: spacing.md }}>
+              <XPProgressBar
+                level={levelInfo.level}
+                xp={levelInfo.xp}
+                xpForCurrent={levelInfo.xpForCurrent}
+                xpForNext={levelInfo.xpForNext}
+                progress={levelInfo.progress}
+                title={levelInfo.title}
+                compact
+              />
+            </View>
+          )}
+
+          {myTeam && (
+            <Pressable
+              onPress={() => router.push({ pathname: '/team-detail', params: { id: myTeam.id } })}
+              style={[styles.teamPill, { backgroundColor: `${colors.secondary}15`, borderColor: `${colors.secondary}35` }]}
+            >
+              <Ionicons name="people" size={14} color={colors.secondary} />
+              <Text style={[styles.teamPillText, { color: colors.secondary }]}>{myTeam.name}</Text>
+              <Ionicons name="chevron-forward" size={12} color={colors.secondary} />
+            </Pressable>
+          )}
         </Card>
 
         {loading ? (
@@ -569,73 +572,26 @@ export default function Profile() {
               <SectionHeading
                 icon="ribbon-outline"
                 title="Achievements"
-                subtitle="Milestones you have unlocked"
+                subtitle={`${earnedIds.size} badge${earnedIds.size !== 1 ? 's' : ''} earned`}
                 colors={colors}
               />
-              <View style={styles.achievementsGrid}>
-                {achievements.map((a) => (
-                  <View
-                    key={a.id}
-                    style={[
-                      styles.achievementBadge,
-                      {
-                        backgroundColor: a.unlocked ? `${colors.primary}12` : colors.surfaceVariant,
-                        borderColor: a.unlocked ? `${colors.primary}35` : colors.border,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.achievementIconWrap,
-                        {
-                          backgroundColor: a.unlocked ? `${colors.primary}16` : `${colors.textTertiary}15`,
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={a.icon}
-                        size={18}
-                        color={a.unlocked ? colors.primary : colors.textTertiary}
-                      />
-                    </View>
-                    <Text
-                      style={[
-                        styles.achievementTitle,
-                        { color: a.unlocked ? colors.text : colors.textTertiary },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {a.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.achievementDesc,
-                        { color: a.unlocked ? colors.textSecondary : colors.textTertiary },
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {a.description}
-                    </Text>
-                    <View
-                      style={[
-                        styles.unlockedBadge,
-                        {
-                          backgroundColor: a.unlocked ? `${colors.correct}15` : `${colors.textTertiary}18`,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.unlockedText,
-                          { color: a.unlocked ? colors.correct : colors.textTertiary },
-                        ]}
-                      >
-                        {a.unlocked ? 'Unlocked' : 'Locked'}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
+              {badges.length > 0 ? (
+                <BadgeGrid badges={badges} earnedIds={earnedIds} />
+              ) : (
+                <View style={styles.emptyWrap}>
+                  <Ionicons name="ribbon-outline" size={20} color={colors.textTertiary} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                    No badges earned yet. Keep solving puzzles!
+                  </Text>
+                </View>
+              )}
+              <Pressable
+                onPress={() => router.push('/badges')}
+                style={[styles.viewAllRow, { borderTopColor: colors.border }]}
+              >
+                <Text style={[styles.viewAllText, { color: colors.primary }]}>View All Badges</Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+              </Pressable>
             </Card>
 
             <Card style={styles.historyCard} padding="lg">
@@ -1123,36 +1079,28 @@ const styles = StyleSheet.create({
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
 
   achievementsCard: { marginBottom: spacing.md },
-  achievementsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  achievementBadge: {
-    width: '48%' as any,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  achievementIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  viewAllRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xs,
+    gap: 4,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
   },
-  achievementTitle: {
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.bold,
-    marginBottom: 2,
-    textAlign: 'center',
-  },
-  achievementDesc: { fontSize: fontSize.xs, textAlign: 'center' },
-  unlockedBadge: {
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
+  viewAllText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  teamPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
     borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    marginTop: spacing.sm,
+    alignSelf: 'flex-start',
   },
-  unlockedText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  teamPillText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
 
   historyCard: { marginBottom: spacing.md },
   emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.lg, gap: spacing.xs },

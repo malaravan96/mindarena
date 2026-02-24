@@ -169,6 +169,25 @@ export default function AppLayout() {
           tabBarStyle: { display: 'none' },
         }}
       />
+      <Tabs.Screen name="rewards" options={{ href: null }} />
+      <Tabs.Screen name="badges" options={{ href: null }} />
+      <Tabs.Screen name="avatar-customization" options={{ href: null }} />
+      <Tabs.Screen name="timed-challenge" options={{ href: null }} />
+      <Tabs.Screen name="puzzle-streak" options={{ href: null }} />
+      <Tabs.Screen name="category-mastery" options={{ href: null }} />
+      <Tabs.Screen name="practice" options={{ href: null }} />
+      <Tabs.Screen name="weekly-challenge" options={{ href: null }} />
+      <Tabs.Screen name="tournaments" options={{ href: null }} />
+      <Tabs.Screen name="tournament-detail" options={{ href: null }} />
+      <Tabs.Screen name="tournament-results" options={{ href: null }} />
+      <Tabs.Screen name="activity-feed" options={{ href: null }} />
+      <Tabs.Screen name="player-search" options={{ href: null }} />
+      <Tabs.Screen name="player-profile" options={{ href: null }} />
+      <Tabs.Screen name="teams" options={{ href: null }} />
+      <Tabs.Screen name="team-detail" options={{ href: null }} />
+      <Tabs.Screen name="team-chat" options={{ href: null }} />
+      <Tabs.Screen name="team-challenge" options={{ href: null }} />
+      <Tabs.Screen name="team-leaderboard" options={{ href: null }} />
     </Tabs>
   );
 }

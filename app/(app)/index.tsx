@@ -17,8 +17,11 @@ import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { offlinePuzzles, Puzzle, PuzzleType } from '@/lib/puzzles';
 import { todayKey } from '@/lib/date';
+import { getCurrentLevelProgress } from '@/lib/xp';
+import { getDailyRewardStatus, claimDailyReward } from '@/lib/dailyRewards';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { XPProgressBar } from '@/components/rewards/XPProgressBar';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
 
@@ -76,6 +79,8 @@ export default function Home() {
   const [userPoints, setUserPoints] = useState(0);
   const [solversCount, setSolversCount] = useState(0);
   const [userRank, setUserRank] = useState<number | null>(null);
+  const [levelInfo, setLevelInfo] = useState({ level: 1, xp: 0, xpForCurrent: 0, xpForNext: 100, progress: 0, title: 'Newcomer' });
+  const [dailyClaimed, setDailyClaimed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -113,6 +118,31 @@ export default function Home() {
       if (profileData) {
         setUserStreak(profileData.streak_count ?? 0);
         setUserPoints(profileData.total_points ?? 0);
+      }
+
+      // Load level progress
+      const level = await getCurrentLevelProgress(uid);
+      setLevelInfo(level);
+
+      // Check daily reward status
+      const daily = await getDailyRewardStatus(uid);
+      setDailyClaimed(daily.todayClaimed);
+    } catch {
+      // silently fail
+    }
+  }
+
+  async function handleClaimDaily() {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (!uid) return;
+      const result = await claimDailyReward(uid);
+      if (result) {
+        setDailyClaimed(true);
+        showAlert('Daily Reward!', `You earned +${result.xpEarned} XP! Login streak: ${result.newStreak} days`);
+        const level = await getCurrentLevelProgress(uid);
+        setLevelInfo(level);
       }
     } catch {
       // silently fail
@@ -313,7 +343,47 @@ export default function Home() {
               </View>
             </View>
           </View>
+          <View style={styles.heroXpRow}>
+            <XPProgressBar {...levelInfo} compact />
+          </View>
         </LinearGradient>
+
+        <View style={styles.modeActionsRow}>
+          {!dailyClaimed && (
+            <Pressable onPress={handleClaimDaily} style={[styles.dailyClaimBtn, { backgroundColor: `${colors.warning}15`, borderColor: `${colors.warning}40` }]}>
+              <Ionicons name="gift-outline" size={16} color={colors.warning} />
+              <Text style={[styles.dailyClaimText, { color: colors.warning }]}>Claim Daily Reward</Text>
+            </Pressable>
+          )}
+          <Pressable onPress={() => router.push('/rewards')} style={[styles.rewardHubBtn, { backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}35` }]}>
+            <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+            <Text style={[styles.rewardHubText, { color: colors.primary }]}>Rewards Hub</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.modeGrid}>
+          <Text style={[styles.modeGridTitle, { color: colors.text }]}>Game Modes</Text>
+          <View style={styles.modeRow}>
+            {[
+              { key: 'timed-challenge', label: 'Timed', icon: 'timer-outline' as const, desc: '3-10 min sprint' },
+              { key: 'puzzle-streak', label: 'Streak', icon: 'trending-up-outline' as const, desc: 'Don\'t miss!' },
+              { key: 'category-mastery', label: 'Mastery', icon: 'school-outline' as const, desc: 'Per category' },
+              { key: 'practice', label: 'Practice', icon: 'book-outline' as const, desc: 'No pressure' },
+            ].map((mode) => (
+              <Pressable
+                key={mode.key}
+                onPress={() => router.push(`/${mode.key}` as any)}
+                style={[styles.modeCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <View style={[styles.modeIconWrap, { backgroundColor: `${colors.primary}12` }]}>
+                  <Ionicons name={mode.icon} size={18} color={colors.primary} />
+                </View>
+                <Text style={[styles.modeLabel, { color: colors.text }]}>{mode.label}</Text>
+                <Text style={[styles.modeDesc, { color: colors.textSecondary }]}>{mode.desc}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
 
         <View style={styles.sectionRow}>
           <View style={styles.sectionHeader}>
@@ -659,6 +729,55 @@ const styles = StyleSheet.create({
   },
   heroStatValue: { color: '#fff', fontSize: fontSize.base, fontWeight: fontWeight.black },
   heroStatLabel: { color: 'rgba(255,255,255,0.82)', fontSize: fontSize.xs },
+  heroXpRow: { marginTop: spacing.sm },
+
+  modeActionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  dailyClaimBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+  },
+  dailyClaimText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  rewardHubBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+  },
+  rewardHubText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+
+  modeGrid: { marginBottom: spacing.md },
+  modeGridTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black, marginBottom: spacing.sm },
+  modeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  modeCard: {
+    width: '47%' as any,
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  modeIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  modeDesc: { fontSize: fontSize.xs },
 
   sectionRow: { marginBottom: spacing.md },
   sectionHeader: { marginBottom: spacing.sm, paddingHorizontal: 2 },
