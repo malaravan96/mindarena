@@ -36,13 +36,12 @@ import { showAlert, showConfirm } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import type { CallUiState, DmMessage } from '@/lib/types';
-import { RtcVideoView } from '@/components/chat/RtcVideoView';
+import { FullScreenCallOverlay } from '@/components/chat/FullScreenCallOverlay';
 
 type CallMode = 'audio' | 'video';
 type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
 
 const OUTGOING_CALL_TIMEOUT_MS = 30_000;
-const VIDEO_STAGE_HEIGHT = 220;
 const DM_SIGNAL_E2EE_ENABLED = false;
 
 function getStreamUrl(stream: any | null) {
@@ -77,6 +76,7 @@ export function ChatThreadScreen() {
   const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState(56);
+  const [callOverlayMinimized, setCallOverlayMinimized] = useState(false);
 
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const callRef = useRef<DmWebRTCCall | null>(null);
@@ -747,30 +747,15 @@ export function ChatThreadScreen() {
     [colors, userId],
   );
 
-  const callStateLabel =
-    callState === 'live'
-      ? activeCallMode === 'video'
-        ? 'Video call live'
-        : 'Voice call live'
-      : callState === 'connecting'
-        ? 'Connecting...'
-        : callState === 'reconnecting'
-          ? 'Reconnecting...'
-          : outgoingMode
-            ? `Calling (${outgoingMode})...`
-            : 'Call off';
-  const callStateColor =
-    callState === 'live'
-      ? colors.correct
-      : callState === 'reconnecting'
-        ? colors.warning
-        : outgoingMode
-          ? colors.primary
-          : colors.textSecondary;
-  const showCallPanel = !!incomingInvite || !!outgoingMode || callState !== 'off';
+  const showCallOverlay = !!incomingInvite || !!outgoingMode || callState !== 'off';
   const callStartDisabled = !peerId || !!outgoingMode || callState !== 'off';
-  const canControlCall = callState !== 'off';
-  const showVideoStage = activeCallMode === 'video' && (callState === 'connecting' || callState === 'live' || callState === 'reconnecting');
+
+  // Auto-expand overlay when a call starts
+  useEffect(() => {
+    if (showCallOverlay) {
+      setCallOverlayMinimized(false);
+    }
+  }, [showCallOverlay]);
 
   if (!conversationId) {
     return (
@@ -871,169 +856,40 @@ export function ChatThreadScreen() {
         </View>
       </View>
 
-      {showCallPanel && (
-        <View
-          style={[
-            styles.callPanel,
-            {
-              borderBottomColor: colors.border,
-              backgroundColor: colors.surface,
-            },
-          ]}
+      <FullScreenCallOverlay
+        visible={showCallOverlay && !callOverlayMinimized}
+        onMinimize={() => setCallOverlayMinimized(true)}
+        callState={callState}
+        activeCallMode={activeCallMode}
+        incomingInvite={incomingInvite}
+        outgoingMode={outgoingMode}
+        peerName={peerName}
+        peerAvatarUrl={peerAvatarUrl}
+        callMuted={callMuted}
+        cameraEnabled={cameraEnabled}
+        speakerOn={speakerOn}
+        opponentMuted={opponentMuted}
+        localStreamUrl={localStreamUrl}
+        remoteStreamUrl={remoteStreamUrl}
+        onAccept={() => void acceptIncomingCall()}
+        onDecline={() => void declineIncomingCall()}
+        onEndCall={() => void endCall(true)}
+        onToggleMute={toggleMute}
+        onToggleCamera={toggleCamera}
+        onToggleSpeaker={() => void toggleSpeakerMode()}
+      />
+
+      {showCallOverlay && callOverlayMinimized && (
+        <Pressable
+          onPress={() => setCallOverlayMinimized(false)}
+          style={[styles.callBar, { backgroundColor: colors.correct }]}
         >
-          <View style={[styles.callPill, { backgroundColor: `${callStateColor}16` }]}>
-            <View style={[styles.callDot, { backgroundColor: callStateColor }]} />
-            <Text style={[styles.callPillText, { color: callStateColor }]}>{callStateLabel}</Text>
-          </View>
-
-          {showVideoStage && (
-            <View style={[styles.videoStage, { borderColor: colors.border }]}>
-              <RtcVideoView
-                streamURL={remoteStreamUrl}
-                style={styles.remoteVideo}
-                emptyLabel={callState === 'connecting' ? 'Connecting video...' : 'Waiting for peer video...'}
-              />
-              {!remoteStreamUrl && (
-                <View style={styles.videoRemoteFallback}>
-                  {peerAvatarUrl ? (
-                    <Image source={{ uri: peerAvatarUrl }} style={styles.videoRemoteAvatar} />
-                  ) : (
-                    <View style={[styles.videoRemoteAvatarFallback, { backgroundColor: `${colors.primary}1f` }]}>
-                      <Text style={[styles.videoRemoteAvatarText, { color: colors.primary }]}>
-                        {peerName.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                  <Text style={[styles.videoRemoteLabel, { color: colors.textSecondary }]}>{peerName}</Text>
-                </View>
-              )}
-              <View style={[styles.videoPipWrap, { borderColor: colors.border }]}>
-                <RtcVideoView
-                  streamURL={localStreamUrl}
-                  style={styles.videoPip}
-                  mirror
-                  emptyLabel={cameraEnabled ? 'Loading camera...' : 'Camera off'}
-                />
-              </View>
-            </View>
-          )}
-
-          {!!incomingInvite && (
-            <View style={styles.callInviteRow}>
-              <Text style={[styles.callInviteText, { color: colors.text }]}>
-                {incomingInvite.fromName} is calling ({incomingInvite.mode})
-              </Text>
-              <View style={styles.callInviteActions}>
-                <Pressable
-                  onPress={() => void acceptIncomingCall()}
-                  style={[styles.callActionBtn, { backgroundColor: colors.correct }]}
-                >
-                  <Text style={styles.callActionText}>Accept</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void declineIncomingCall()}
-                  style={[styles.callActionBtn, { backgroundColor: colors.wrong }]}
-                >
-                  <Text style={styles.callActionText}>Decline</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          {callState !== 'off' && (
-            <View style={styles.callControlRow}>
-              <Pressable
-                onPress={toggleMute}
-                disabled={!canControlCall}
-                style={[
-                  styles.callControlBtn,
-                  {
-                    opacity: canControlCall ? 1 : 0.45,
-                    borderColor: callMuted ? `${colors.warning}35` : `${colors.primary}35`,
-                    backgroundColor: callMuted ? `${colors.warning}14` : `${colors.primary}14`,
-                  },
-                ]}
-              >
-                <Ionicons name={callMuted ? 'mic-off-outline' : 'mic-outline'} size={16} color={callMuted ? colors.warning : colors.primary} />
-                <Text style={[styles.callControlText, { color: callMuted ? colors.warning : colors.primary }]}>
-                  {callMuted ? 'Unmute' : 'Mute'}
-                </Text>
-              </Pressable>
-
-              {activeCallMode === 'video' && (
-                <Pressable
-                  onPress={toggleCamera}
-                  disabled={!canControlCall || activeCallMode !== 'video'}
-                  style={[
-                    styles.callControlBtn,
-                    {
-                      opacity: canControlCall ? 1 : 0.45,
-                      borderColor: cameraEnabled ? `${colors.secondary}35` : `${colors.warning}35`,
-                      backgroundColor: cameraEnabled ? `${colors.secondary}14` : `${colors.warning}14`,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={cameraEnabled ? 'videocam-outline' : 'videocam-off-outline'}
-                    size={16}
-                    color={cameraEnabled ? colors.secondary : colors.warning}
-                  />
-                  <Text style={[styles.callControlText, { color: cameraEnabled ? colors.secondary : colors.warning }]}>
-                    {cameraEnabled ? 'Camera On' : 'Camera Off'}
-                  </Text>
-                </Pressable>
-              )}
-
-              <Pressable
-                onPress={() => void toggleSpeakerMode()}
-                disabled={!canControlCall}
-                style={[
-                  styles.callControlBtn,
-                  {
-                    opacity: canControlCall ? 1 : 0.45,
-                    borderColor: speakerOn ? `${colors.primary}35` : `${colors.border}`,
-                    backgroundColor: speakerOn ? `${colors.primary}14` : colors.surfaceVariant,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={speakerOn ? 'volume-high-outline' : 'volume-mute-outline'}
-                  size={16}
-                  color={speakerOn ? colors.primary : colors.textSecondary}
-                />
-                <Text style={[styles.callControlText, { color: speakerOn ? colors.primary : colors.textSecondary }]}>
-                  {speakerOn ? 'Speaker On' : 'Speaker Off'}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => void endCall(true)}
-                disabled={!canControlCall}
-                style={[
-                  styles.callControlBtn,
-                  {
-                    opacity: canControlCall ? 1 : 0.45,
-                    borderColor: `${colors.wrong}35`,
-                    backgroundColor: `${colors.wrong}14`,
-                  },
-                ]}
-              >
-                <Ionicons name="call-outline" size={16} color={colors.wrong} />
-                <Text style={[styles.callControlText, { color: colors.wrong }]}>End</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {callState !== 'off' && opponentMuted && (
-            <Text style={[styles.callMetaText, { color: colors.textSecondary }]}>Peer muted microphone</Text>
-          )}
-
-          {Platform.OS === 'web' && (
-            <Text style={[styles.callMetaText, { color: colors.textSecondary }]}>
-              Calling is available on Android/iOS builds.
-            </Text>
-          )}
-        </View>
+          <Ionicons name={activeCallMode === 'video' ? 'videocam' : 'call'} size={16} color="#fff" />
+          <Text style={styles.callBarText} numberOfLines={1}>
+            {activeCallMode === 'video' ? 'Video' : 'Voice'} call with {peerName}
+          </Text>
+          <Ionicons name="chevron-up" size={18} color="#fff" />
+        </Pressable>
       )}
 
       {loading ? (
@@ -1156,103 +1012,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  callPanel: {
-    borderBottomWidth: 1,
+  callBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     gap: spacing.sm,
   },
-  callPill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-  },
-  callDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  callPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
-  videoStage: {
-    height: VIDEO_STAGE_HEIGHT,
-    borderWidth: 1,
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-  },
-  remoteVideo: {
-    width: '100%',
-    height: '100%',
-  },
-  videoRemoteFallback: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  videoRemoteAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
-  videoRemoteAvatarFallback: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoRemoteAvatarText: {
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
-  videoRemoteLabel: {
-    fontSize: fontSize.xs,
+  callBarText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
   },
-  videoPipWrap: {
-    position: 'absolute',
-    top: spacing.sm,
-    right: spacing.sm,
-    width: 96,
-    height: 132,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-  },
-  videoPip: {
-    width: '100%',
-    height: '100%',
-  },
-  callInviteRow: { gap: spacing.sm },
-  callInviteText: { fontSize: fontSize.sm, fontWeight: fontWeight.medium },
-  callInviteActions: { flexDirection: 'row', gap: spacing.sm },
-  callActionBtn: {
-    flex: 1,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    alignItems: 'center',
-  },
-  callActionText: { color: '#fff', fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-  callControlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  callControlBtn: {
-    minWidth: '46%',
-    flexGrow: 1,
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  callControlText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
-  callMetaText: { fontSize: fontSize.xs, fontWeight: fontWeight.medium },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   body: { flex: 1 },
   log: { flex: 1 },
