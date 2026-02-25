@@ -21,6 +21,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useCall } from '@/contexts/CallContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage } from '@/lib/dm';
 import { blockUser, unblockUser, isBlocked as checkIsBlocked } from '@/lib/connections';
@@ -78,6 +79,7 @@ export function ChatThreadScreen() {
   const router = useRouter();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { colors } = useTheme();
+  const { publishCallState, clearCallState, registerEndCallFn } = useCall();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -687,6 +689,33 @@ export function ChatThreadScreen() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearOutgoingTimer, endCall]);
+
+  // Register endCall fn with context so PiP can end the call
+  useEffect(() => {
+    registerEndCallFn(() => endCall(true));
+    return () => registerEndCallFn(null);
+  }, [endCall, registerEndCallFn]);
+
+  // Sync call state to context for PiP display
+  useEffect(() => {
+    if (callState === 'off' && !incomingInvite && !outgoingMode) {
+      clearCallState();
+      return;
+    }
+    if (!conversationId || !peerId) return;
+    publishCallState({
+      conversationId,
+      peerId,
+      peerName,
+      peerAvatarUrl,
+      callState,
+      callMode: activeCallMode,
+      callMuted,
+      remoteStreamUrl,
+      localStreamUrl,
+    });
+  }, [callState, incomingInvite, outgoingMode, callMuted, remoteStreamUrl, localStreamUrl, activeCallMode,
+      conversationId, peerId, peerName, peerAvatarUrl, publishCallState, clearCallState]);
 
   async function pickImage(fromCamera: boolean) {
     if (!conversationId || isBlockedState) return;
