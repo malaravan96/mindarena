@@ -207,3 +207,5 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.group_messages;
 -- ============================================================
 -- DONE. Verify by checking Supabase Table Editor.
 -- ============================================================
+-- Next migration: 20260225_reactions_and_replies.sql
+--   Adds dm_messages.reply_to_id and dm_message_reactions table.

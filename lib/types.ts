@@ -85,6 +85,21 @@ export interface DmMessage {
   attachment_width?: number | null;
   attachment_height?: number | null;
   expires_at?: string | null;
+  reply_to_id?: string | null;
+}
+
+export interface DmReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+}
+
+export interface DmReactionGroup {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
 }
 
 // ── Group Chat ───────────────────────────────────────────────

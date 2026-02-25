@@ -226,7 +226,7 @@ export async function listMessages(
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at')
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(400);
@@ -272,7 +272,7 @@ export async function listMessages(
   return decrypted;
 }
 
-export async function sendMessage(conversationId: string, body: string) {
+export async function sendMessage(conversationId: string, body: string, replyToId?: string | null) {
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
   let canEncrypt = DM_E2EE_ENABLED;
@@ -322,8 +322,8 @@ export async function sendMessage(conversationId: string, body: string) {
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody, status: 'sent', message_type: 'text' })
-    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at')
+    .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody, status: 'sent', message_type: 'text', reply_to_id: replyToId ?? null })
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id')
     .maybeSingle<DmMessage>();
 
   if (error || !data) throw error ?? new Error('Message insert failed');

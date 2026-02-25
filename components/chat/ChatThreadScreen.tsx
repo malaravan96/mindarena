@@ -24,6 +24,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useCall } from '@/contexts/CallContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage } from '@/lib/dm';
+import { loadReactionsForMessages, toggleReaction, groupReactions, broadcastReaction } from '@/lib/dmReactions';
 import { blockUser, unblockUser, isBlocked as checkIsBlocked } from '@/lib/connections';
 import {
   decryptDmCallPayload,
@@ -44,10 +45,11 @@ import { sendTypingSignal, sendTypingStop } from '@/lib/typing';
 import { getConversationSettings, setDisappearingMessages } from '@/lib/dmSettings';
 import { reportUser, type ReportReason } from '@/lib/report';
 import { sendImageMessage, sendVoiceMessage } from '@/lib/dmAttachments';
-import type { CallUiState, DmMessage } from '@/lib/types';
+import type { CallUiState, DmMessage, DmReactionGroup } from '@/lib/types';
 import { FullScreenCallOverlay } from '@/components/chat/FullScreenCallOverlay';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
+import { ReactionPicker } from '@/components/chat/ReactionPicker';
 import { ScreenshotWarningBanner } from '@/components/chat/ScreenshotWarningBanner';
 
 type CallMode = 'audio' | 'video';
@@ -104,6 +106,10 @@ export function ChatThreadScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [reactionsMap, setReactionsMap] = useState<Map<string, DmReactionGroup[]>>(new Map());
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
+  const [replyTarget, setReplyTarget] = useState<DmMessage | null>(null);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
   const [outgoingMode, setOutgoingMode] = useState<CallMode | null>(null);
@@ -399,6 +405,16 @@ export function ChatThreadScreen() {
           .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null; is_online: boolean | null; last_seen_at: string | null }>(),
       ]);
       setMessages(rows);
+
+      // Load reactions for all messages
+      if (rows.length > 0 && uid) {
+        loadReactionsForMessages(rows.map((r) => r.id))
+          .then((reactions) => {
+            setReactionsMap(groupReactions(reactions, uid));
+          })
+          .catch(() => null);
+      }
+
       setPeerName(profile?.display_name || profile?.username || 'Player');
       setPeerAvatarUrl(profile?.avatar_url ?? null);
       setPeerIsOnline(profile?.is_online ?? false);
@@ -516,6 +532,35 @@ export function ChatThreadScreen() {
               msg.id === updated.id ? { ...msg, status: updated.status } : msg,
             ),
           );
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'dm_message_reactions',
+        },
+        ({ new: row }) => {
+          const r = row as { message_id: string; user_id: string; emoji: string };
+          const uid = userIdRef.current;
+          if (!uid) return;
+          setReactionsMap((prev) => {
+            const next = new Map(prev);
+            const groups = [...(next.get(r.message_id) ?? [])];
+            const idx = groups.findIndex((g) => g.emoji === r.emoji);
+            if (idx >= 0) {
+              groups[idx] = {
+                ...groups[idx],
+                count: groups[idx].count + 1,
+                reactedByMe: groups[idx].reactedByMe || r.user_id === uid,
+              };
+            } else {
+              groups.push({ emoji: r.emoji, count: 1, reactedByMe: r.user_id === uid });
+            }
+            next.set(r.message_id, groups.sort((a, b) => b.count - a.count));
+            return next;
+          });
         },
       )
       .subscribe();
@@ -667,6 +712,47 @@ export function ChatThreadScreen() {
           setOpponentMuted(!!data.muted);
         })();
       })
+      .on('broadcast', { event: 'dm-reaction' }, ({ payload }) => {
+        const p = (payload ?? {}) as { userId?: string; messageId?: string; emoji?: string; added?: boolean };
+        if (!p.messageId || !p.emoji) return;
+        const uid = userIdRef.current;
+        setReactionsMap((prev) => {
+          const next = new Map(prev);
+          const groups = [...(next.get(p.messageId!) ?? [])];
+          if (p.added) {
+            const idx = groups.findIndex((g) => g.emoji === p.emoji);
+            if (idx >= 0) {
+              groups[idx] = {
+                ...groups[idx],
+                count: groups[idx].count + 1,
+                reactedByMe: groups[idx].reactedByMe || p.userId === uid,
+              };
+            } else {
+              groups.push({ emoji: p.emoji!, count: 1, reactedByMe: p.userId === uid });
+            }
+          } else {
+            const idx = groups.findIndex((g) => g.emoji === p.emoji);
+            if (idx >= 0) {
+              const newCount = groups[idx].count - 1;
+              if (newCount <= 0) {
+                groups.splice(idx, 1);
+              } else {
+                groups[idx] = {
+                  ...groups[idx],
+                  count: newCount,
+                  reactedByMe: p.userId === uid ? false : groups[idx].reactedByMe,
+                };
+              }
+            }
+          }
+          if (groups.length === 0) {
+            next.delete(p.messageId!);
+          } else {
+            next.set(p.messageId!, groups.sort((a, b) => b.count - a.count));
+          }
+          return next;
+        });
+      })
       .subscribe();
 
     callChannelRef.current = channel;
@@ -801,6 +887,8 @@ export function ChatThreadScreen() {
     if (!body) return;
     shouldAutoScrollRef.current = true;
 
+    const replyToId = replyTarget?.id ?? null;
+
     // Stop typing signal
     if (callChannelRef.current && userId && conversationId) {
       sendTypingStop(callChannelRef.current, userId, conversationId).catch(() => null);
@@ -808,7 +896,7 @@ export function ChatThreadScreen() {
 
     setSending(true);
     try {
-      const row = await sendMessage(conversationId, body);
+      const row = await sendMessage(conversationId, body, replyToId);
       setMessages((prev) => {
         if (prev.some((msg) => msg.id === row.id)) return prev;
         const next = [...prev, row];
@@ -816,6 +904,7 @@ export function ChatThreadScreen() {
         return next;
       });
       setInput('');
+      setReplyTarget(null);
       void notifyDmMessage(row.id).catch((error) => {
         console.warn('DM push notify failed', error);
       });
@@ -836,6 +925,65 @@ export function ChatThreadScreen() {
       }
     }
   }
+
+  const handleLongPress = useCallback((messageId: string) => {
+    setReactionPickerMessageId(messageId);
+  }, []);
+
+  const handleReactionSelect = useCallback(async (messageId: string, emoji: string) => {
+    setReactionPickerMessageId(null);
+    const uid = userIdRef.current;
+    if (!uid) return;
+
+    // Optimistic update
+    setReactionsMap((prev) => {
+      const next = new Map(prev);
+      const groups = [...(next.get(messageId) ?? [])];
+      const idx = groups.findIndex((g) => g.emoji === emoji);
+      if (idx >= 0 && groups[idx].reactedByMe) {
+        const newCount = groups[idx].count - 1;
+        if (newCount <= 0) groups.splice(idx, 1);
+        else groups[idx] = { ...groups[idx], count: newCount, reactedByMe: false };
+      } else if (idx >= 0) {
+        groups[idx] = { ...groups[idx], count: groups[idx].count + 1, reactedByMe: true };
+      } else {
+        groups.push({ emoji, count: 1, reactedByMe: true });
+      }
+      if (groups.length === 0) next.delete(messageId);
+      else next.set(messageId, groups.sort((a, b) => b.count - a.count));
+      return next;
+    });
+
+    try {
+      const result = await toggleReaction(messageId, emoji);
+      if (callChannelRef.current) {
+        broadcastReaction(callChannelRef.current, uid, messageId, emoji, result.added).catch(() => null);
+      }
+    } catch {
+      // Re-fetch reactions for this message to restore correct state
+      loadReactionsForMessages([messageId])
+        .then((reactions) => {
+          const currentUid = userIdRef.current;
+          if (!currentUid) return;
+          const refreshed = groupReactions(reactions, currentUid).get(messageId) ?? [];
+          setReactionsMap((prev) => {
+            const next = new Map(prev);
+            if (refreshed.length === 0) next.delete(messageId);
+            else next.set(messageId, refreshed);
+            return next;
+          });
+        })
+        .catch(() => null);
+    }
+  }, []);
+
+  const handleSwipeReply = useCallback((message: DmMessage) => {
+    setReplyTarget(message);
+  }, []);
+
+  const clearReply = useCallback(() => {
+    setReplyTarget(null);
+  }, []);
 
   async function startCall(mode: CallMode) {
     if (!conversationId || !userId || !peerId) return;
@@ -930,20 +1078,42 @@ export function ChatThreadScreen() {
   }
 
   const renderMessageItem = useCallback(
-    ({ item }: { item: DmMessage }) => (
-      <MessageBubble
-        item={item}
-        isOwn={item.sender_id === userId}
-        playingVoiceId={playingVoiceId}
-        onImagePress={(url) => {
-          router.push({ pathname: '/image-viewer', params: { url } });
-        }}
-        onVoicePress={(url, id) => {
-          setPlayingVoiceId((prev) => (prev === id ? null : id));
-        }}
-      />
-    ),
-    [userId, playingVoiceId, router],
+    ({ item }: { item: DmMessage }) => {
+      const replyTo = item.reply_to_id
+        ? messages.find((m) => m.id === item.reply_to_id) ?? null
+        : null;
+      return (
+        <MessageBubble
+          item={item}
+          isOwn={item.sender_id === userId}
+          playingVoiceId={playingVoiceId}
+          reactions={reactionsMap.get(item.id) ?? []}
+          replyTo={replyTo}
+          peerName={peerName}
+          currentUserId={userId ?? undefined}
+          onImagePress={(url) => {
+            router.push({ pathname: '/image-viewer', params: { url } });
+          }}
+          onVoicePress={(url, id) => {
+            setPlayingVoiceId((prev) => (prev === id ? null : id));
+          }}
+          onLongPress={() => handleLongPress(item.id)}
+          onReactionPress={(emoji) => { void handleReactionSelect(item.id, emoji); }}
+          onSwipeReply={() => handleSwipeReply(item)}
+          onReplyQuotePress={() => {
+            const idx = sortedMessages.findIndex((m) => m.id === item.reply_to_id);
+            if (idx >= 0) {
+              messageListRef.current?.scrollToIndex({
+                index: idx,
+                animated: true,
+                viewPosition: 0.3,
+              });
+            }
+          }}
+        />
+      );
+    },
+    [userId, playingVoiceId, router, messages, reactionsMap, peerName, sortedMessages, handleLongPress, handleReactionSelect, handleSwipeReply],
   );
 
   const showCallOverlay = !!incomingInvite || !!outgoingMode || callState !== 'off';
@@ -1154,6 +1324,26 @@ export function ChatThreadScreen() {
             }
           />
 
+          {replyTarget && (
+            <View style={[styles.replyBar, { backgroundColor: colors.surfaceVariant, borderTopColor: colors.border, borderLeftColor: colors.primary }]}>
+              <View style={styles.replyBarContent}>
+                <Text style={[styles.replyBarName, { color: colors.primary }]} numberOfLines={1}>
+                  {replyTarget.sender_id === userId ? 'You' : peerName}
+                </Text>
+                <Text style={[styles.replyBarBody, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {(replyTarget.message_type === 'image' ? '[image]'
+                    : replyTarget.message_type === 'voice' ? '[voice message]'
+                    : replyTarget.message_type === 'file' ? '[file]'
+                    : replyTarget.message_type === 'video' ? '[video]'
+                    : replyTarget.body) || ''}
+                </Text>
+              </View>
+              <Pressable onPress={clearReply} style={styles.replyBarClose}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
           <View
             style={[
               styles.composer,
@@ -1244,6 +1434,16 @@ export function ChatThreadScreen() {
         visible={showEmojiPicker}
         onSelect={(emoji) => setInput((prev) => prev + emoji)}
         onClose={() => setShowEmojiPicker(false)}
+      />
+
+      <ReactionPicker
+        visible={reactionPickerMessageId !== null}
+        onSelect={(emoji) => {
+          if (reactionPickerMessageId) {
+            void handleReactionSelect(reactionPickerMessageId, emoji);
+          }
+        }}
+        onClose={() => setReactionPickerMessageId(null)}
       />
 
       {/* Disappearing Messages Modal */}
@@ -1516,4 +1716,23 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   recordingTime: { flex: 1, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderLeftWidth: 3,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    gap: spacing.sm,
+  },
+  replyBarContent: { flex: 1, gap: 2 },
+  replyBarName: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  replyBarBody: { fontSize: fontSize.xs },
+  replyBarClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

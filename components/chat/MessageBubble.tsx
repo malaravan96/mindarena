@@ -1,9 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable, Linking, Image } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, StyleSheet, Pressable, Linking, Image, PanResponder } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
-import type { DmMessage, DmMessageStatus } from '@/lib/types';
+import type { DmMessage, DmMessageStatus, DmReactionGroup } from '@/lib/types';
 
 interface MessageBubbleProps {
   item: DmMessage;
@@ -11,6 +11,14 @@ interface MessageBubbleProps {
   onImagePress?: (url: string) => void;
   onVoicePress?: (url: string, messageId: string) => void;
   playingVoiceId?: string | null;
+  reactions?: DmReactionGroup[];
+  onReactionPress?: (emoji: string) => void;
+  onLongPress?: () => void;
+  replyTo?: DmMessage | null;
+  onReplyQuotePress?: () => void;
+  onSwipeReply?: () => void;
+  peerName?: string;
+  currentUserId?: string;
 }
 
 function StatusIcon({ status }: { status?: DmMessageStatus }) {
@@ -49,13 +57,113 @@ function formatDuration(secs?: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function MessageBubble({ item, isOwn, onImagePress, onVoicePress, playingVoiceId }: MessageBubbleProps) {
+function getReplyPreview(msg: DmMessage): string {
+  const type = msg.message_type ?? 'text';
+  if (type === 'image') return '[image]';
+  if (type === 'voice') return '[voice message]';
+  if (type === 'video') return '[video]';
+  if (type === 'file') return '[file]';
+  return msg.body || '';
+}
+
+interface ReplyQuoteBoxProps {
+  replyTo: DmMessage;
+  senderName: string;
+  onPress?: () => void;
+  primaryColor: string;
+  textColor: string;
+  surfaceColor: string;
+}
+
+function ReplyQuoteBox({ replyTo, senderName, onPress, primaryColor, textColor, surfaceColor }: ReplyQuoteBoxProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.replyQuoteBox, { borderLeftColor: primaryColor, backgroundColor: surfaceColor }]}
+    >
+      <Text style={[styles.replyQuoteName, { color: primaryColor }]} numberOfLines={1}>
+        {senderName}
+      </Text>
+      <Text style={[styles.replyQuoteBody, { color: textColor }]} numberOfLines={2}>
+        {getReplyPreview(replyTo)}
+      </Text>
+    </Pressable>
+  );
+}
+
+interface ReactionPillsRowProps {
+  reactions: DmReactionGroup[];
+  onReactionPress?: (emoji: string) => void;
+  isOwn: boolean;
+  primaryColor: string;
+  surfaceColor: string;
+  borderColor: string;
+  textColor: string;
+}
+
+function ReactionPillsRow({ reactions, onReactionPress, isOwn, primaryColor, surfaceColor, borderColor, textColor }: ReactionPillsRowProps) {
+  return (
+    <View style={[styles.reactionRow, { justifyContent: isOwn ? 'flex-end' : 'flex-start' }]}>
+      {reactions.map((group) => (
+        <Pressable
+          key={group.emoji}
+          onPress={() => onReactionPress?.(group.emoji)}
+          style={[
+            styles.reactionPill,
+            {
+              backgroundColor: group.reactedByMe ? `${primaryColor}18` : surfaceColor,
+              borderColor: group.reactedByMe ? primaryColor : borderColor,
+            },
+          ]}
+        >
+          <Text style={styles.reactionEmoji}>{group.emoji}</Text>
+          {group.count > 1 && (
+            <Text style={[styles.reactionCount, { color: group.reactedByMe ? primaryColor : textColor }]}>
+              {group.count}
+            </Text>
+          )}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+export function MessageBubble({
+  item,
+  isOwn,
+  onImagePress,
+  onVoicePress,
+  playingVoiceId,
+  reactions,
+  onReactionPress,
+  onLongPress,
+  replyTo,
+  onReplyQuotePress,
+  onSwipeReply,
+  peerName,
+  currentUserId,
+}: MessageBubbleProps) {
   const { colors } = useTheme();
   const msgType = item.message_type ?? 'text';
   const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const bubbleBg = isOwn ? `${colors.primary}16` : colors.surfaceVariant;
   const bubbleBorder = isOwn ? `${colors.primary}35` : colors.border;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dx > 12 && Math.abs(g.dy) < 20,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx > 50) onSwipeReply?.();
+      },
+    }),
+  ).current;
+
+  const replyQuoteSenderName = replyTo
+    ? replyTo.sender_id === currentUserId
+      ? 'You'
+      : peerName ?? 'Peer'
+    : '';
 
   const renderContent = () => {
     if (msgType === 'image' && item.attachment_url) {
@@ -144,23 +252,48 @@ export function MessageBubble({ item, isOwn, onImagePress, onVoicePress, playing
     );
   };
 
+  const hasReactions = reactions && reactions.length > 0;
+
   return (
-    <View style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }]}>
-      <View
-        style={[
-          styles.bubble,
-          {
-            backgroundColor: bubbleBg,
-            borderColor: bubbleBorder,
-          },
-        ]}
-      >
-        {renderContent()}
-      </View>
+    <View {...panResponder.panHandlers} style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }]}>
+      <Pressable onLongPress={onLongPress} delayLongPress={350}>
+        <View
+          style={[
+            styles.bubble,
+            {
+              backgroundColor: bubbleBg,
+              borderColor: bubbleBorder,
+            },
+          ]}
+        >
+          {replyTo && (
+            <ReplyQuoteBox
+              replyTo={replyTo}
+              senderName={replyQuoteSenderName}
+              onPress={onReplyQuotePress}
+              primaryColor={colors.primary}
+              textColor={colors.textSecondary}
+              surfaceColor={`${colors.primary}0d`}
+            />
+          )}
+          {renderContent()}
+        </View>
+      </Pressable>
       <View style={styles.metaRow}>
         <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
         {isOwn && <StatusIcon status={item.status} />}
       </View>
+      {hasReactions && (
+        <ReactionPillsRow
+          reactions={reactions!}
+          onReactionPress={onReactionPress}
+          isOwn={isOwn}
+          primaryColor={colors.primary}
+          surfaceColor={colors.surface}
+          borderColor={colors.border}
+          textColor={colors.textSecondary}
+        />
+      )}
     </View>
   );
 }
@@ -214,4 +347,33 @@ const styles = StyleSheet.create({
   },
   fileName: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   fileSize: { fontSize: fontSize.xs, marginTop: 2 },
+  // Reply quote box
+  replyQuoteBox: {
+    borderLeftWidth: 3,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    marginBottom: spacing.xs,
+    gap: 2,
+  },
+  replyQuoteName: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  replyQuoteBody: { fontSize: fontSize.xs, lineHeight: fontSize.xs * 1.4 },
+  // Reaction pills
+  reactionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    maxWidth: '84%',
+  },
+  reactionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  reactionEmoji: { fontSize: 14 },
+  reactionCount: { fontSize: 11, fontWeight: fontWeight.semibold },
 });
