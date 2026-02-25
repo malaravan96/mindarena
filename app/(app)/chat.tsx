@@ -9,6 +9,7 @@ import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, getOrCreateConversation, listConversations, listMessageTargets } from '@/lib/dm';
+import { useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
 import { listGroupConversations } from '@/lib/groupChat';
 import { supabase } from '@/lib/supabase';
 import type { ConnectionWithProfile, DmConversation, GroupConversation } from '@/lib/types';
@@ -24,6 +25,7 @@ type MessageTarget = {
 export default function ChatScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { refreshUnread } = useGlobalNotifications();
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<DmConversation[]>([]);
@@ -94,11 +96,12 @@ export default function ChatScreen() {
         if (!uid || !active) return;
         if (!userId) setUserId(uid);
         await loadData(uid);
+        if (active) refreshUnread();
       })();
       return () => {
         active = false;
       };
-    }, [userId, loadData]),
+    }, [userId, loadData, refreshUnread]),
   );
 
   async function openConversation(peerUserId: string) {

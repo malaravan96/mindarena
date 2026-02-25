@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useCall } from '@/contexts/CallContext';
+import { useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage } from '@/lib/dm';
 import { loadReactionsForMessages, toggleReaction, groupReactions, broadcastReaction } from '@/lib/dmReactions';
@@ -82,6 +83,7 @@ export function ChatThreadScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { colors } = useTheme();
   const { publishCallState, clearCallState, registerEndCallFn } = useCall();
+  const { setActiveConversationId, consumePendingIncomingInvite } = useGlobalNotifications();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -138,6 +140,13 @@ export function ChatThreadScreen() {
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { peerIdRef.current = peerId; }, [peerId]);
   useEffect(() => { conversationIdRef.current = conversationId ?? null; }, [conversationId]);
+
+  // Register this thread as the active conversation so global overlays are suppressed
+  useEffect(() => {
+    if (!conversationId) return;
+    setActiveConversationId(conversationId);
+    return () => setActiveConversationId(null);
+  }, [conversationId, setActiveConversationId]);
 
   const sortedMessages = useMemo(
     () => [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at)),
@@ -373,6 +382,13 @@ export function ChatThreadScreen() {
       if (!uid) return;
       await ensureDmE2eeReady(uid).catch(() => null);
 
+      // If user accepted an incoming call from the global overlay, feed the invite
+      // into local state so FullScreenCallOverlay activates automatically.
+      const pending = consumePendingIncomingInvite(conversationId);
+      if (pending) {
+        setIncomingInvite({ fromId: pending.fromId, fromName: pending.fromName, mode: pending.mode });
+      }
+
       const [{ data: me }, { data: conversation }] = await Promise.all([
         supabase
           .from('profiles')
@@ -429,7 +445,7 @@ export function ChatThreadScreen() {
     } finally {
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, consumePendingIncomingInvite]);
 
   useEffect(() => {
     loadThread().catch(() => null);

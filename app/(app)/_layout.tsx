@@ -10,7 +10,10 @@ import { upsertCurrentUserPushToken } from '@/lib/push';
 import { trackPresence } from '@/lib/presence';
 import { getCurrentUserId } from '@/lib/dm';
 import { CallProvider } from '@/contexts/CallContext';
+import { GlobalNotificationsProvider, useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
 import { PiPCallWindow } from '@/components/chat/PiPCallWindow';
+import { GlobalIncomingCallOverlay } from '@/components/chat/GlobalIncomingCallOverlay';
+import { GlobalMessageToastBanner } from '@/components/chat/GlobalMessageToastBanner';
 
 type TabRoute = 'index' | 'leaderboard' | 'pvp' | 'profile' | 'chat';
 
@@ -49,11 +52,12 @@ const TAB_CONFIG: TabConfig[] = [
   },
 ];
 
-export default function AppLayout() {
+function AppLayoutContent() {
   const router = useRouter();
   const { colors, colorScheme } = useTheme();
   const insets = useSafeAreaInsets();
   const presenceCleanupRef = useRef<(() => void) | null>(null);
+  const { totalUnread } = useGlobalNotifications();
 
   const isIOS = Platform.OS === 'ios';
   const bottomInset = Math.max(insets.bottom, isIOS ? 14 : 10);
@@ -168,76 +172,92 @@ export default function AppLayout() {
   );
 
   return (
-    <CallProvider>
-      <View style={{ flex: 1 }}>
-        <Tabs screenOptions={screenOptions}>
-          {TAB_CONFIG.map((tab) => (
-            <Tabs.Screen
-              key={tab.name}
-              name={tab.name}
-              options={{
-                title: tab.title,
-                tabBarIcon: ({ color, size, focused }) => (
-                  <View
-                    style={[
-                      styles.iconContainer,
-                      focused && {
-                        backgroundColor:
-                          colorScheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={focused ? tab.icon.active : tab.icon.inactive}
-                      size={size + 1}
-                      color={color}
-                    />
-                  </View>
-                ),
-              }}
-            />
-          ))}
+    <View style={{ flex: 1 }}>
+      <Tabs screenOptions={screenOptions}>
+        {TAB_CONFIG.map((tab) => (
           <Tabs.Screen
-            name="chat-thread"
+            key={tab.name}
+            name={tab.name}
             options={{
-              href: null,
-              tabBarStyle: { display: 'none' },
+              title: tab.title,
+              tabBarBadge:
+                tab.name === 'chat' && totalUnread > 0
+                  ? totalUnread > 99
+                    ? '99+'
+                    : String(totalUnread)
+                  : undefined,
+              tabBarIcon: ({ color, size, focused }) => (
+                <View
+                  style={[
+                    styles.iconContainer,
+                    focused && {
+                      backgroundColor:
+                        colorScheme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={focused ? tab.icon.active : tab.icon.inactive}
+                    size={size + 1}
+                    color={color}
+                  />
+                </View>
+              ),
             }}
           />
-          <Tabs.Screen name="rewards" options={{ href: null }} />
-          <Tabs.Screen name="badges" options={{ href: null }} />
-          <Tabs.Screen name="avatar-customization" options={{ href: null }} />
-          <Tabs.Screen name="timed-challenge" options={{ href: null }} />
-          <Tabs.Screen name="puzzle-streak" options={{ href: null }} />
-          <Tabs.Screen name="category-mastery" options={{ href: null }} />
-          <Tabs.Screen name="practice" options={{ href: null }} />
-          <Tabs.Screen name="weekly-challenge" options={{ href: null }} />
-          <Tabs.Screen name="tournaments" options={{ href: null }} />
-          <Tabs.Screen name="tournament-detail" options={{ href: null }} />
-          <Tabs.Screen name="tournament-results" options={{ href: null }} />
-          <Tabs.Screen name="activity-feed" options={{ href: null }} />
-          <Tabs.Screen name="player-search" options={{ href: null }} />
-          <Tabs.Screen name="player-profile" options={{ href: null }} />
-          <Tabs.Screen name="teams" options={{ href: null }} />
-          <Tabs.Screen name="team-detail" options={{ href: null }} />
-          <Tabs.Screen name="team-chat" options={{ href: null }} />
-          <Tabs.Screen name="team-challenge" options={{ href: null }} />
-          <Tabs.Screen name="team-leaderboard" options={{ href: null }} />
-          <Tabs.Screen
-            name="group-chat"
-            options={{ href: null, tabBarStyle: { display: 'none' } }}
-          />
-          <Tabs.Screen
-            name="create-group"
-            options={{ href: null, tabBarStyle: { display: 'none' } }}
-          />
-          <Tabs.Screen
-            name="image-viewer"
-            options={{ href: null, tabBarStyle: { display: 'none' } }}
-          />
-        </Tabs>
-        <PiPCallWindow />
-      </View>
+        ))}
+        <Tabs.Screen
+          name="chat-thread"
+          options={{
+            href: null,
+            tabBarStyle: { display: 'none' },
+          }}
+        />
+        <Tabs.Screen name="rewards" options={{ href: null }} />
+        <Tabs.Screen name="badges" options={{ href: null }} />
+        <Tabs.Screen name="avatar-customization" options={{ href: null }} />
+        <Tabs.Screen name="timed-challenge" options={{ href: null }} />
+        <Tabs.Screen name="puzzle-streak" options={{ href: null }} />
+        <Tabs.Screen name="category-mastery" options={{ href: null }} />
+        <Tabs.Screen name="practice" options={{ href: null }} />
+        <Tabs.Screen name="weekly-challenge" options={{ href: null }} />
+        <Tabs.Screen name="tournaments" options={{ href: null }} />
+        <Tabs.Screen name="tournament-detail" options={{ href: null }} />
+        <Tabs.Screen name="tournament-results" options={{ href: null }} />
+        <Tabs.Screen name="activity-feed" options={{ href: null }} />
+        <Tabs.Screen name="player-search" options={{ href: null }} />
+        <Tabs.Screen name="player-profile" options={{ href: null }} />
+        <Tabs.Screen name="teams" options={{ href: null }} />
+        <Tabs.Screen name="team-detail" options={{ href: null }} />
+        <Tabs.Screen name="team-chat" options={{ href: null }} />
+        <Tabs.Screen name="team-challenge" options={{ href: null }} />
+        <Tabs.Screen name="team-leaderboard" options={{ href: null }} />
+        <Tabs.Screen
+          name="group-chat"
+          options={{ href: null, tabBarStyle: { display: 'none' } }}
+        />
+        <Tabs.Screen
+          name="create-group"
+          options={{ href: null, tabBarStyle: { display: 'none' } }}
+        />
+        <Tabs.Screen
+          name="image-viewer"
+          options={{ href: null, tabBarStyle: { display: 'none' } }}
+        />
+      </Tabs>
+      <PiPCallWindow />
+      <GlobalIncomingCallOverlay />
+      <GlobalMessageToastBanner />
+    </View>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <CallProvider>
+      <GlobalNotificationsProvider>
+        <AppLayoutContent />
+      </GlobalNotificationsProvider>
     </CallProvider>
   );
 }
