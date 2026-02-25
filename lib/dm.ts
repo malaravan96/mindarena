@@ -9,7 +9,7 @@ import {
 } from '@/lib/dmE2ee';
 import { getAcceptedPeerIds, getBlockedIds, isBlocked } from '@/lib/connections';
 
-const DM_E2EE_ENABLED = false;
+const DM_E2EE_ENABLED = true;
 
 type ConversationRow = {
   id: string;
@@ -113,7 +113,7 @@ export async function listConversations(userId: string): Promise<DmConversation[
 
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, display_name, avatar_url')
+    .select('id, username, display_name, avatar_url, is_online, last_seen_at')
     .in('id', peerIds);
 
   const profileById = new Map(
@@ -122,6 +122,8 @@ export async function listConversations(userId: string): Promise<DmConversation[
       {
         name: p.display_name || p.username || 'Player',
         avatar_url: p.avatar_url ?? null,
+        is_online: p.is_online ?? false,
+        last_seen_at: p.last_seen_at ?? null,
       },
     ]),
   );
@@ -196,6 +198,8 @@ export async function listConversations(userId: string): Promise<DmConversation[
         peer_id: peerId,
         peer_name: peer?.name ?? 'Player',
         peer_avatar_url: peer?.avatar_url ?? null,
+        peer_is_online: peer?.is_online ?? false,
+        peer_last_seen_at: peer?.last_seen_at ?? null,
         last_message: lastMessage,
         unread_count: unreadByConversation.get(c.id) ?? 0,
       };
@@ -222,7 +226,7 @@ export async function listMessages(
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .select('id, conversation_id, sender_id, body, created_at')
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(400);
@@ -318,8 +322,8 @@ export async function sendMessage(conversationId: string, body: string) {
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody })
-    .select('id, conversation_id, sender_id, body, created_at')
+    .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody, status: 'sent', message_type: 'text' })
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at')
     .maybeSingle<DmMessage>();
 
   if (error || !data) throw error ?? new Error('Message insert failed');
@@ -339,12 +343,34 @@ export async function markConversationRead(conversationId: string) {
   const uid = await getCurrentUserId();
   if (!uid) return;
 
+  await Promise.all([
+    supabase
+      .from('dm_participants')
+      .upsert(
+        { conversation_id: conversationId, user_id: uid, last_read_at: new Date().toISOString() },
+        { onConflict: 'conversation_id,user_id' },
+      ),
+    // Mark incoming messages as 'seen'
+    supabase
+      .from('dm_messages')
+      .update({ status: 'seen' })
+      .eq('conversation_id', conversationId)
+      .neq('sender_id', uid)
+      .in('status', ['sent', 'delivered']),
+  ]);
+}
+
+/** Mark incoming messages as 'delivered' (called when new messages arrive and chat is open). */
+export async function markMessagesDelivered(conversationId: string) {
+  const uid = await getCurrentUserId();
+  if (!uid) return;
+
   await supabase
-    .from('dm_participants')
-    .upsert(
-      { conversation_id: conversationId, user_id: uid, last_read_at: new Date().toISOString() },
-      { onConflict: 'conversation_id,user_id' },
-    );
+    .from('dm_messages')
+    .update({ status: 'delivered' })
+    .eq('conversation_id', conversationId)
+    .neq('sender_id', uid)
+    .eq('status', 'sent');
 }
 
 export async function getTotalDmUnread(userId: string) {

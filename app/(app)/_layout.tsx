@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -7,12 +7,15 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { upsertCurrentUserPushToken } from '@/lib/push';
+import { trackPresence } from '@/lib/presence';
+import { getCurrentUserId } from '@/lib/dm';
 
 type TabRoute = 'index' | 'leaderboard' | 'pvp' | 'profile' | 'chat';
 
 type NotificationPayload = {
   type?: unknown;
   conversation_id?: unknown;
+  group_id?: unknown;
 };
 
 type TabConfig = {
@@ -48,6 +51,7 @@ export default function AppLayout() {
   const router = useRouter();
   const { colors, colorScheme } = useTheme();
   const insets = useSafeAreaInsets();
+  const presenceCleanupRef = useRef<(() => void) | null>(null);
 
   const isIOS = Platform.OS === 'ios';
   const bottomInset = Math.max(insets.bottom, isIOS ? 14 : 10);
@@ -56,18 +60,45 @@ export default function AppLayout() {
     upsertCurrentUserPushToken().catch(() => null);
   }, []);
 
+  // Presence tracking
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const uid = await getCurrentUserId();
+      if (!uid || !mounted) return;
+      const cleanup = await trackPresence(uid);
+      if (mounted) {
+        presenceCleanupRef.current = cleanup;
+      } else {
+        cleanup();
+      }
+    })();
+    return () => {
+      mounted = false;
+      presenceCleanupRef.current?.();
+      presenceCleanupRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
     const routeFromPayload = (raw: unknown) => {
       const data = raw as NotificationPayload | null | undefined;
-      if (data?.type !== 'dm') return;
-      if (typeof data.conversation_id !== 'string') return;
-
-      router.push({
-        pathname: '/chat-thread',
-        params: { conversationId: data.conversation_id },
-      });
+      if (data?.type === 'dm') {
+        if (typeof data.conversation_id !== 'string') return;
+        router.push({
+          pathname: '/chat-thread',
+          params: { conversationId: data.conversation_id },
+        });
+      } else if (data?.type === 'group') {
+        const groupId = (data as any).group_id;
+        if (typeof groupId !== 'string') return;
+        router.push({
+          pathname: '/group-chat',
+          params: { groupId },
+        });
+      }
     };
 
     Notifications.getLastNotificationResponseAsync()
@@ -188,6 +219,18 @@ export default function AppLayout() {
       <Tabs.Screen name="team-chat" options={{ href: null }} />
       <Tabs.Screen name="team-challenge" options={{ href: null }} />
       <Tabs.Screen name="team-leaderboard" options={{ href: null }} />
+      <Tabs.Screen
+        name="group-chat"
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
+      />
+      <Tabs.Screen
+        name="create-group"
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
+      />
+      <Tabs.Screen
+        name="image-viewer"
+        options={{ href: null, tabBarStyle: { display: 'none' } }}
+      />
     </Tabs>
   );
 }

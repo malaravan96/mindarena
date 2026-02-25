@@ -61,9 +61,14 @@ export interface DmConversation {
   peer_id: string;
   peer_name: string;
   peer_avatar_url?: string | null;
+  peer_is_online?: boolean;
+  peer_last_seen_at?: string | null;
   last_message?: string;
   unread_count: number;
 }
+
+export type DmMessageType = 'text' | 'image' | 'voice' | 'video' | 'file';
+export type DmMessageStatus = 'sent' | 'delivered' | 'seen';
 
 export interface DmMessage {
   id: string;
@@ -71,6 +76,68 @@ export interface DmMessage {
   sender_id: string;
   body: string;
   created_at: string;
+  status?: DmMessageStatus;
+  message_type?: DmMessageType;
+  attachment_url?: string | null;
+  attachment_mime?: string | null;
+  attachment_size?: number | null;
+  attachment_duration?: number | null;
+  attachment_width?: number | null;
+  attachment_height?: number | null;
+  expires_at?: string | null;
+}
+
+// ── Group Chat ───────────────────────────────────────────────
+
+export type GroupRole = 'owner' | 'admin' | 'member';
+
+export interface GroupConversation {
+  id: string;
+  name: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  created_by: string;
+  created_at: string;
+  last_message_at: string;
+  max_members: number;
+  unread_count?: number;
+  last_message?: string | null;
+  member_count?: number;
+}
+
+export interface GroupMember {
+  group_id: string;
+  user_id: string;
+  role: GroupRole;
+  joined_at: string;
+  last_read_at: string;
+  profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>;
+}
+
+export type GroupMessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'system';
+
+export interface GroupMessage {
+  id: string;
+  group_id: string;
+  sender_id: string;
+  body: string;
+  message_type: GroupMessageType;
+  attachment_url?: string | null;
+  attachment_mime?: string | null;
+  attachment_size?: number | null;
+  attachment_duration?: number | null;
+  attachment_width?: number | null;
+  attachment_height?: number | null;
+  expires_at?: string | null;
+  created_at: string;
+  sender_profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>;
+}
+
+export interface DmConversationSettings {
+  conversation_id: string;
+  disappearing_messages_ttl?: number | null; // seconds; null = disabled
+  updated_at: string;
+  updated_by?: string | null;
 }
 
 export interface PushToken {

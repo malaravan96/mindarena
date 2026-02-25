@@ -9,8 +9,9 @@ import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import { getCurrentUserId, getOrCreateConversation, listConversations, listMessageTargets } from '@/lib/dm';
+import { listGroupConversations } from '@/lib/groupChat';
 import { supabase } from '@/lib/supabase';
-import type { ConnectionWithProfile, DmConversation } from '@/lib/types';
+import type { ConnectionWithProfile, DmConversation, GroupConversation } from '@/lib/types';
 import { listConnections, acceptChatRequest, declineChatRequest } from '@/lib/connections';
 
 type MessageTarget = {
@@ -26,6 +27,7 @@ export default function ChatScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<DmConversation[]>([]);
+  const [groups, setGroups] = useState<GroupConversation[]>([]);
   const [targets, setTargets] = useState<MessageTarget[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ConnectionWithProfile[]>([]);
 
@@ -37,13 +39,15 @@ export default function ChatScreen() {
   const loadData = useCallback(async (uid: string) => {
     setLoading(true);
     try {
-      const [rows, people, pending] = await Promise.all([
+      const [rows, people, pending, groupRows] = await Promise.all([
         listConversations(uid),
         listMessageTargets(uid),
         listConnections(uid, 'pending'),
+        listGroupConversations(uid).catch(() => [] as GroupConversation[]),
       ]);
       setConversations(rows);
       setTargets(people);
+      setGroups(groupRows);
       // Only show incoming pending requests (where current user is the target)
       setPendingRequests(pending.filter((c) => c.target_id === uid));
     } finally {
@@ -111,9 +115,18 @@ export default function ChatScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Chat</Text>
-        <View style={[styles.unreadPill, { backgroundColor: `${colors.primary}16` }]}>
-          <Ionicons name="mail-unread-outline" size={13} color={colors.primary} />
-          <Text style={[styles.unreadPillText, { color: colors.primary }]}>{titleCount} unread</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <View style={[styles.unreadPill, { backgroundColor: `${colors.primary}16` }]}>
+            <Ionicons name="mail-unread-outline" size={13} color={colors.primary} />
+            <Text style={[styles.unreadPillText, { color: colors.primary }]}>{titleCount} unread</Text>
+          </View>
+          <Pressable
+            onPress={() => router.push('/create-group')}
+            style={[styles.newGroupBtn, { backgroundColor: `${colors.secondary}16` }]}
+          >
+            <Ionicons name="people-outline" size={15} color={colors.secondary} />
+            <Text style={[styles.newGroupText, { color: colors.secondary }]}>New Group</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -188,15 +201,20 @@ export default function ChatScreen() {
                   }
                   style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
                 >
-                  {item.peer_avatar_url ? (
-                    <Image source={{ uri: item.peer_avatar_url }} style={styles.avatarImage} />
-                  ) : (
-                    <View style={[styles.avatar, { backgroundColor: `${colors.primary}16` }]}>
-                      <Text style={[styles.avatarText, { color: colors.primary }]}>
-                        {(item.peer_name || 'P').slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
+                  <View style={styles.avatarWrap}>
+                    {item.peer_avatar_url ? (
+                      <Image source={{ uri: item.peer_avatar_url }} style={styles.avatarImage} />
+                    ) : (
+                      <View style={[styles.avatar, { backgroundColor: `${colors.primary}16` }]}>
+                        <Text style={[styles.avatarText, { color: colors.primary }]}>
+                          {(item.peer_name || 'P').slice(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    {item.peer_is_online && (
+                      <View style={[styles.onlineDot, { backgroundColor: '#22c55e', borderColor: colors.surfaceVariant }]} />
+                    )}
+                  </View>
 
                   <View style={styles.rowMain}>
                     <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
@@ -221,6 +239,47 @@ export default function ChatScreen() {
               ))
             )}
           </Card>
+
+          {groups.length > 0 && (
+            <Card style={styles.blockCard} padding="md">
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Group Chats</Text>
+              {groups.map((group) => (
+                <Pressable
+                  key={group.id}
+                  onPress={() => router.push({ pathname: '/group-chat', params: { groupId: group.id } })}
+                  style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+                >
+                  {group.avatar_url ? (
+                    <Image source={{ uri: group.avatar_url }} style={styles.avatarImage} />
+                  ) : (
+                    <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
+                      <Text style={[styles.avatarText, { color: colors.secondary }]}>
+                        {(group.name || 'G').slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.rowMain}>
+                    <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
+                      {group.name}
+                    </Text>
+                    <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {group.last_message || `${group.member_count ?? '?'} members`}
+                    </Text>
+                  </View>
+                  <View style={styles.rowRight}>
+                    <Text style={[styles.rowTime, { color: colors.textTertiary }]}>
+                      {formatPreviewTime(group.last_message_at)}
+                    </Text>
+                    {(group.unread_count ?? 0) > 0 && (
+                      <View style={[styles.badge, { backgroundColor: colors.secondary }]}>
+                        <Text style={styles.badgeText}>{(group.unread_count ?? 0) > 99 ? '99+' : group.unread_count}</Text>
+                      </View>
+                    )}
+                  </View>
+                </Pressable>
+              ))}
+            </Card>
+          )}
 
           <Card style={styles.blockCard} padding="md">
             <Text style={[styles.sectionLabel, { color: colors.text }]}>Connected Players</Text>
@@ -292,6 +351,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     gap: spacing.sm,
   },
+  avatarWrap: { position: 'relative' },
   avatar: {
     width: 38,
     height: 38,
@@ -305,6 +365,24 @@ const styles = StyleSheet.create({
     borderRadius: 19,
   },
   avatarText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    borderWidth: 2,
+  },
+  newGroupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  newGroupText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   rowMain: { flex: 1 },
   rowTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
   rowSubtitle: { fontSize: fontSize.sm, marginTop: 2 },

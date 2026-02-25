@@ -58,7 +58,12 @@ function getEnvelopeParts(envelope: string) {
   if (!envelope.startsWith(`${ENVELOPE_PREFIX}:`)) {
     return null;
   }
-  const [, nonceHex = '', cipherHex = ''] = envelope.split(':');
+  // envelope = 'e2ee:v1:{nonceHex}:{cipherHex}'
+  // split(':') = ['e2ee', 'v1', nonceHex, cipherHex]
+  // Must skip BOTH 'e2ee' (index 0) and 'v1' (index 1)
+  const parts = envelope.split(':');
+  const nonceHex = parts[2] ?? '';
+  const cipherHex = parts[3] ?? '';
   if (!nonceHex || !cipherHex) return null;
   return { nonceHex, cipherHex };
 }

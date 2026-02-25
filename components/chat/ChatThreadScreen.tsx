@@ -10,6 +10,8 @@ import {
   Platform,
   KeyboardAvoidingView,
   FlatList,
+  Modal,
+  ScrollView,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -20,7 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
-import { getCurrentUserId, listMessages, markConversationRead, sendMessage } from '@/lib/dm';
+import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage } from '@/lib/dm';
 import { blockUser, unblockUser, isBlocked as checkIsBlocked } from '@/lib/connections';
 import {
   decryptDmCallPayload,
@@ -35,18 +37,41 @@ import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
+import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
+import { sendTypingSignal, sendTypingStop } from '@/lib/typing';
+import { getConversationSettings, setDisappearingMessages } from '@/lib/dmSettings';
+import { reportUser, type ReportReason } from '@/lib/report';
+import { sendImageMessage, sendVoiceMessage } from '@/lib/dmAttachments';
 import type { CallUiState, DmMessage } from '@/lib/types';
 import { FullScreenCallOverlay } from '@/components/chat/FullScreenCallOverlay';
+import { MessageBubble } from '@/components/chat/MessageBubble';
+import { EmojiPicker } from '@/components/chat/EmojiPicker';
+import { ScreenshotWarningBanner } from '@/components/chat/ScreenshotWarningBanner';
 
 type CallMode = 'audio' | 'video';
 type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
 
 const OUTGOING_CALL_TIMEOUT_MS = 30_000;
-const DM_SIGNAL_E2EE_ENABLED = false;
+const DM_SIGNAL_E2EE_ENABLED = true;
+const TYPING_RESET_MS = 4000;
 
 function getStreamUrl(stream: any | null) {
   if (!stream || typeof stream.toURL !== 'function') return null;
   return stream.toURL();
+}
+
+function formatLastSeen(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 export function ChatThreadScreen() {
@@ -60,10 +85,23 @@ export function ChatThreadScreen() {
   const [peerId, setPeerId] = useState<string | null>(null);
   const [peerName, setPeerName] = useState('Player');
   const [peerAvatarUrl, setPeerAvatarUrl] = useState<string | null>(null);
+  const [peerIsOnline, setPeerIsOnline] = useState(false);
+  const [peerLastSeen, setPeerLastSeen] = useState<string | null>(null);
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [isBlockedState, setIsBlockedState] = useState(false);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [disappearingTtl, setDisappearingTtl] = useState<number | null>(null);
+  const [showDisappearingModal, setShowDisappearingModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState<ReportReason>('spam');
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
   const [outgoingMode, setOutgoingMode] = useState<CallMode | null>(null);
@@ -87,6 +125,7 @@ export function ChatThreadScreen() {
   const userIdRef = useRef<string | null>(null);
   const peerIdRef = useRef<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
+  const typingResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { peerIdRef.current = peerId; }, [peerId]);
@@ -157,12 +196,7 @@ export function ChatThreadScreen() {
       await channel.send({
         type: 'broadcast',
         event,
-        payload: {
-          ...payload,
-          conversationId: convId,
-          fromId,
-          toId,
-        },
+        payload: { ...payload, conversationId: convId, fromId, toId },
       });
     };
 
@@ -187,14 +221,7 @@ export function ChatThreadScreen() {
       await channel.send({
         type: 'broadcast',
         event,
-        payload: {
-          ...payload,
-          conversationId: convId,
-          fromId,
-          toId,
-          enc: envelope,
-          v: 1,
-        },
+        payload: { ...payload, conversationId: convId, fromId, toId, enc: envelope, v: 1 },
       });
       return true;
     } catch (error) {
@@ -233,7 +260,6 @@ export function ChatThreadScreen() {
         });
         return { ...payload, ...decrypted };
       } catch {
-        // Compatibility path: if sender included plaintext fields, keep processing.
         return payload;
       }
     },
@@ -281,10 +307,7 @@ export function ChatThreadScreen() {
           mediaMode: mode,
           iceServers: buildIceServers(),
           sendSignal: (event, payload) => {
-            void sendCallSignal(event, {
-              ...payload,
-              toId: peerIdRef.current,
-            });
+            void sendCallSignal(event, { ...payload, toId: peerIdRef.current });
           },
           callbacks: {
             onStateChange: (state) => {
@@ -302,21 +325,13 @@ export function ChatThreadScreen() {
                 setSpeakerOn(false);
                 setLocalStreamUrl(null);
                 setRemoteStreamUrl(null);
-                if (callRef.current === client) {
-                  callRef.current = null;
-                }
+                if (callRef.current === client) callRef.current = null;
                 void stopCallAudio();
               }
             },
-            onLocalStream: (stream) => {
-              setLocalStreamUrl(getStreamUrl(stream));
-            },
-            onRemoteStream: (stream) => {
-              setRemoteStreamUrl(getStreamUrl(stream));
-            },
-            onError: (message) => {
-              showAlert('Call failed', message);
-            },
+            onLocalStream: (stream) => setLocalStreamUrl(getStreamUrl(stream)),
+            onRemoteStream: (stream) => setRemoteStreamUrl(getStreamUrl(stream)),
+            onError: (message) => showAlert('Call failed', message),
           },
         });
 
@@ -333,9 +348,7 @@ export function ChatThreadScreen() {
       try {
         return await initPromise;
       } finally {
-        if (callInitPromiseRef.current === initPromise) {
-          callInitPromiseRef.current = null;
-        }
+        if (callInitPromiseRef.current === initPromise) callInitPromiseRef.current = null;
       }
     },
     [buildIceServers, sendCallSignal],
@@ -371,7 +384,6 @@ export function ChatThreadScreen() {
       const nextPeerId = conversation.user_a === uid ? conversation.user_b : conversation.user_a;
       setPeerId(nextPeerId);
 
-      // Check block status
       const blocked = await checkIsBlocked(uid, nextPeerId);
       setIsBlockedState(blocked);
 
@@ -380,14 +392,22 @@ export function ChatThreadScreen() {
         markConversationRead(conversationId),
         supabase
           .from('profiles')
-          .select('display_name, username, avatar_url')
+          .select('display_name, username, avatar_url, is_online, last_seen_at')
           .eq('id', nextPeerId)
-          .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null }>(),
+          .maybeSingle<{ display_name: string | null; username: string | null; avatar_url: string | null; is_online: boolean | null; last_seen_at: string | null }>(),
       ]);
       setMessages(rows);
-
       setPeerName(profile?.display_name || profile?.username || 'Player');
       setPeerAvatarUrl(profile?.avatar_url ?? null);
+      setPeerIsOnline(profile?.is_online ?? false);
+      setPeerLastSeen(profile?.last_seen_at ?? null);
+
+      // Load conversation settings (disappearing messages)
+      getConversationSettings(conversationId)
+        .then((settings) => {
+          if (settings) setDisappearingTtl(settings.disappearing_messages_ttl ?? null);
+        })
+        .catch(() => null);
     } finally {
       setLoading(false);
     }
@@ -406,6 +426,31 @@ export function ChatThreadScreen() {
     }, [conversationId]),
   );
 
+  // Subscribe to peer profile changes (online status)
+  useEffect(() => {
+    if (!peerId) return;
+    const channel = supabase
+      .channel(`peer-presence-${peerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${peerId}`,
+        },
+        ({ new: row }) => {
+          const p = row as { is_online?: boolean; last_seen_at?: string };
+          setPeerIsOnline(p.is_online ?? false);
+          setPeerLastSeen(p.last_seen_at ?? null);
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [peerId]);
+
+  // Subscribe to new messages
   useEffect(() => {
     if (!conversationId) return;
     const channel: RealtimeChannel = supabase
@@ -444,17 +489,39 @@ export function ChatThreadScreen() {
               next.sort((a, b) => a.created_at.localeCompare(b.created_at));
               return next;
             });
+
+            // Mark as delivered when we receive a new message from peer
+            if (raw.sender_id !== uid) {
+              markMessagesDelivered(conversationId).catch(() => null);
+              markConversationRead(conversationId).catch(() => null);
+            }
           })();
-          markConversationRead(conversationId).catch(() => null);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'dm_messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        ({ new: row }) => {
+          // Update message status in-place
+          const updated = row as DmMessage;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === updated.id ? { ...msg, status: updated.status } : msg,
+            ),
+          );
         },
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
+  // Call channel — also handles typing signals
   useEffect(() => {
     if (!conversationId || !userId) return;
 
@@ -470,6 +537,26 @@ export function ChatThreadScreen() {
     };
 
     channel
+      .on('broadcast', { event: 'dm-typing' }, ({ payload }) => {
+        const p = (payload ?? {}) as Record<string, unknown>;
+        if (p.fromId === userIdRef.current) return;
+        setPeerTyping(true);
+        if (typingResetTimerRef.current) clearTimeout(typingResetTimerRef.current);
+        typingResetTimerRef.current = setTimeout(() => setPeerTyping(false), TYPING_RESET_MS);
+      })
+      .on('broadcast', { event: 'dm-typing-stop' }, ({ payload }) => {
+        const p = (payload ?? {}) as Record<string, unknown>;
+        if (p.fromId === userIdRef.current) return;
+        if (typingResetTimerRef.current) clearTimeout(typingResetTimerRef.current);
+        setPeerTyping(false);
+      })
+      .on('broadcast', { event: 'dm-settings-update' }, ({ payload }) => {
+        const p = (payload ?? {}) as Record<string, unknown>;
+        if (p.fromId === userIdRef.current) return;
+        if (typeof p.disappearing_ttl === 'number' || p.disappearing_ttl === null) {
+          setDisappearingTtl(p.disappearing_ttl as number | null);
+        }
+      })
       .on('broadcast', { event: 'dm-call-invite' }, ({ payload }) => {
         void (async () => {
           const data = await unwrapPayload((payload ?? {}) as Record<string, unknown>);
@@ -594,14 +681,101 @@ export function ChatThreadScreen() {
     return () => {
       clearOutgoingTimer();
       void endCall(false);
+      if (typingResetTimerRef.current) clearTimeout(typingResetTimerRef.current);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recording?.stopAndUnloadAsync().catch(() => null);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearOutgoingTimer, endCall]);
+
+  async function pickImage(fromCamera: boolean) {
+    if (!conversationId || isBlockedState) return;
+    try {
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'images', quality: 0.8 });
+
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      shouldAutoScrollRef.current = true;
+      const row = await sendImageMessage(
+        conversationId,
+        asset.uri,
+        asset.mimeType ?? 'image/jpeg',
+        asset.width,
+        asset.height,
+      );
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === row.id)) return prev;
+        const next = [...prev, row];
+        next.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        return next;
+      });
+    } catch (e: any) {
+      showAlert('Failed', e?.message ?? 'Could not send image');
+    }
+  }
+
+  async function startRecording() {
+    if (isRecording || !conversationId || isBlockedState) return;
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        showAlert('Permission required', 'Microphone access is needed to send voice messages.');
+        return;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      );
+      setRecording(rec);
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((d) => d + 1);
+      }, 1000);
+    } catch (e: any) {
+      showAlert('Recording failed', e?.message ?? 'Could not start recording');
+    }
+  }
+
+  async function stopRecording() {
+    if (!recording || !conversationId) return;
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const duration = recordingDuration;
+    setIsRecording(false);
+    setRecordingDuration(0);
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      setRecording(null);
+      if (!uri) return;
+      shouldAutoScrollRef.current = true;
+      const row = await sendVoiceMessage(conversationId, uri, duration);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === row.id)) return prev;
+        const next = [...prev, row];
+        next.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        return next;
+      });
+    } catch (e: any) {
+      showAlert('Failed', e?.message ?? 'Could not send voice message');
+    }
+  }
 
   async function onSend() {
     if (!conversationId || sending) return;
     const body = input.trim();
     if (!body) return;
     shouldAutoScrollRef.current = true;
+
+    // Stop typing signal
+    if (callChannelRef.current && userId && conversationId) {
+      sendTypingStop(callChannelRef.current, userId, conversationId).catch(() => null);
+    }
 
     setSending(true);
     try {
@@ -620,6 +794,17 @@ export function ChatThreadScreen() {
       showAlert('Send failed', e?.message ?? 'Could not send message');
     } finally {
       setSending(false);
+    }
+  }
+
+  function onInputChange(text: string) {
+    setInput(text);
+    if (callChannelRef.current && userId && conversationId) {
+      if (text.length > 0) {
+        sendTypingSignal(callChannelRef.current, userId, conversationId).catch(() => null);
+      } else {
+        sendTypingStop(callChannelRef.current, userId, conversationId).catch(() => null);
+      }
     }
   }
 
@@ -716,45 +901,27 @@ export function ChatThreadScreen() {
   }
 
   const renderMessageItem = useCallback(
-    ({ item }: { item: DmMessage }) => {
-      const mine = item.sender_id === userId;
-      return (
-        <View
-          style={[
-            styles.msgRow,
-            {
-              alignItems: mine ? 'flex-end' : 'flex-start',
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.bubble,
-              {
-                backgroundColor: mine ? `${colors.primary}16` : colors.surfaceVariant,
-                borderColor: mine ? `${colors.primary}35` : colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
-          </View>
-          <Text style={[styles.msgTime, { color: colors.textTertiary }]}>
-            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-        </View>
-      );
-    },
-    [colors, userId],
+    ({ item }: { item: DmMessage }) => (
+      <MessageBubble
+        item={item}
+        isOwn={item.sender_id === userId}
+        playingVoiceId={playingVoiceId}
+        onImagePress={(url) => {
+          router.push({ pathname: '/image-viewer', params: { url } });
+        }}
+        onVoicePress={(url, id) => {
+          setPlayingVoiceId((prev) => (prev === id ? null : id));
+        }}
+      />
+    ),
+    [userId, playingVoiceId, router],
   );
 
   const showCallOverlay = !!incomingInvite || !!outgoingMode || callState !== 'off';
   const callStartDisabled = !peerId || !!outgoingMode || callState !== 'off';
 
-  // Auto-expand overlay when a call starts
   useEffect(() => {
-    if (showCallOverlay) {
-      setCallOverlayMinimized(false);
-    }
+    if (showCallOverlay) setCallOverlayMinimized(false);
   }, [showCallOverlay]);
 
   if (!conversationId) {
@@ -767,26 +934,37 @@ export function ChatThreadScreen() {
     );
   }
 
+  const headerSubtitle = peerIsOnline
+    ? 'Online'
+    : peerLastSeen
+    ? `Last seen ${formatLastSeen(peerLastSeen)}`
+    : 'Direct message';
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={18} color={colors.text} />
         </Pressable>
-        {peerAvatarUrl ? (
-          <Image source={{ uri: peerAvatarUrl }} style={styles.headerAvatarImage} />
-        ) : (
-          <View style={[styles.headerAvatarFallback, { backgroundColor: `${colors.primary}16` }]}>
-            <Text style={[styles.headerAvatarText, { color: colors.primary }]}>
-              {peerName.slice(0, 2).toUpperCase()}
-            </Text>
-          </View>
-        )}
+        <View style={styles.avatarWrap}>
+          {peerAvatarUrl ? (
+            <Image source={{ uri: peerAvatarUrl }} style={styles.headerAvatarImage} />
+          ) : (
+            <View style={[styles.headerAvatarFallback, { backgroundColor: `${colors.primary}16` }]}>
+              <Text style={[styles.headerAvatarText, { color: colors.primary }]}>
+                {peerName.slice(0, 2).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          {peerIsOnline && <View style={[styles.onlineDot, { backgroundColor: '#22c55e' }]} />}
+        </View>
         <View style={styles.headerTitleWrap}>
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {peerName}
           </Text>
-          <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>Direct message</Text>
+          <Text style={[styles.headerSubtitle, { color: peerIsOnline ? '#22c55e' : colors.textSecondary }]}>
+            {headerSubtitle}
+          </Text>
         </View>
         <View style={styles.headerActions}>
           <Pressable
@@ -853,8 +1031,26 @@ export function ChatThreadScreen() {
               color={isBlockedState ? colors.warning : colors.wrong}
             />
           </Pressable>
+          <Pressable
+            onPress={() => setShowDisappearingModal(true)}
+            style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
+          >
+            <Ionicons
+              name={disappearingTtl ? 'timer' : 'timer-outline'}
+              size={16}
+              color={disappearingTtl ? colors.primary : colors.textSecondary}
+            />
+          </Pressable>
+          <Pressable
+            onPress={() => setShowReportModal(true)}
+            style={[styles.headerActionBtn, { backgroundColor: `${colors.wrong}10` }]}
+          >
+            <Ionicons name="flag-outline" size={16} color={colors.wrong} />
+          </Pressable>
         </View>
       </View>
+
+      <ScreenshotWarningBanner />
 
       <FullScreenCallOverlay
         visible={showCallOverlay && !callOverlayMinimized}
@@ -907,9 +1103,7 @@ export function ChatThreadScreen() {
             style={styles.log}
             contentContainerStyle={[
               styles.logContent,
-              {
-                paddingBottom: composerHeight + insets.bottom + spacing.sm,
-              },
+              { paddingBottom: composerHeight + insets.bottom + spacing.sm },
             ]}
             data={sortedMessages}
             keyExtractor={(item) => item.id}
@@ -919,6 +1113,15 @@ export function ChatThreadScreen() {
             scrollEventThrottle={16}
             ListEmptyComponent={
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No messages yet. Say hi.</Text>
+            }
+            ListFooterComponent={
+              peerTyping ? (
+                <View style={styles.typingRow}>
+                  <Text style={[styles.typingText, { color: colors.textSecondary }]}>
+                    {peerName} is typing...
+                  </Text>
+                </View>
+              ) : null
             }
           />
 
@@ -931,42 +1134,205 @@ export function ChatThreadScreen() {
                 paddingBottom: Math.max(insets.bottom, spacing.sm),
               },
             ]}
-            onLayout={(event) => {
-              setComposerHeight(event.nativeEvent.layout.height);
-            }}
+            onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
           >
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder={isBlockedState ? 'Blocked' : 'Type a message...'}
-              placeholderTextColor={colors.textTertiary}
-              style={[
-                styles.input,
-                {
-                  color: colors.text,
-                  borderColor: colors.border,
-                  backgroundColor: colors.surfaceVariant,
-                },
-              ]}
-              editable={!sending && !isBlockedState}
-              onSubmitEditing={onSend}
-              returnKeyType="send"
-            />
             <Pressable
-              onPress={onSend}
-              disabled={sending || !input.trim() || isBlockedState}
-              style={[
-                styles.sendBtn,
-                {
-                  backgroundColor: sending || !input.trim() || isBlockedState ? colors.border : colors.primary,
-                },
-              ]}
+              onPress={() => setShowEmojiPicker(true)}
+              disabled={isBlockedState}
+              style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10`, opacity: isBlockedState ? 0.4 : 1 }]}
             >
-              <Ionicons name="send" size={16} color="#fff" />
+              <Ionicons name="happy-outline" size={20} color={colors.textSecondary} />
             </Pressable>
+
+            {isRecording ? (
+              <View style={[styles.recordingRow, { backgroundColor: `${colors.wrong}14`, borderColor: `${colors.wrong}30` }]}>
+                <View style={[styles.recordingDot, { backgroundColor: colors.wrong }]} />
+                <Text style={[styles.recordingTime, { color: colors.wrong }]}>
+                  {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                </Text>
+                <Pressable onPress={stopRecording} style={[styles.composerIconBtn, { backgroundColor: `${colors.wrong}20` }]}>
+                  <Ionicons name="stop" size={18} color={colors.wrong} />
+                </Pressable>
+              </View>
+            ) : (
+              <TextInput
+                value={input}
+                onChangeText={onInputChange}
+                onFocus={() => setShowEmojiPicker(false)}
+                placeholder={isBlockedState ? 'Blocked' : 'Type a message...'}
+                placeholderTextColor={colors.textTertiary}
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: colors.surfaceVariant,
+                  },
+                ]}
+                editable={!sending && !isBlockedState}
+                onSubmitEditing={onSend}
+                returnKeyType="send"
+                multiline
+              />
+            )}
+
+            {!isRecording && !input.trim() && !isBlockedState && (
+              <>
+                <Pressable
+                  onPress={() => pickImage(false)}
+                  style={[styles.composerIconBtn, { backgroundColor: `${colors.secondary}10` }]}
+                >
+                  <Ionicons name="image-outline" size={20} color={colors.secondary} />
+                </Pressable>
+                <Pressable
+                  onPress={startRecording}
+                  style={[styles.composerIconBtn, { backgroundColor: `${colors.wrong}10` }]}
+                >
+                  <Ionicons name="mic-outline" size={20} color={colors.wrong} />
+                </Pressable>
+              </>
+            )}
+
+            {!isRecording && (
+              <Pressable
+                onPress={onSend}
+                disabled={sending || !input.trim() || isBlockedState}
+                style={[
+                  styles.sendBtn,
+                  {
+                    backgroundColor: sending || !input.trim() || isBlockedState ? colors.border : colors.primary,
+                  },
+                ]}
+              >
+                <Ionicons name="send" size={16} color="#fff" />
+              </Pressable>
+            )}
           </View>
         </KeyboardAvoidingView>
       )}
+
+      <EmojiPicker
+        visible={showEmojiPicker}
+        onSelect={(emoji) => setInput((prev) => prev + emoji)}
+        onClose={() => setShowEmojiPicker(false)}
+      />
+
+      {/* Disappearing Messages Modal */}
+      <Modal
+        visible={showDisappearingModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDisappearingModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowDisappearingModal(false)} />
+        <View style={[styles.modalSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+          <Text style={[styles.modalTitle, { color: colors.text }]}>Disappearing Messages</Text>
+          <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+            Messages will be deleted after the selected time.
+          </Text>
+          {([
+            { label: 'Off', value: null },
+            { label: '5 minutes', value: 300 },
+            { label: '1 hour', value: 3600 },
+            { label: '24 hours', value: 86400 },
+            { label: '7 days', value: 604800 },
+          ] as { label: string; value: number | null }[]).map((opt) => (
+            <Pressable
+              key={String(opt.value)}
+              onPress={async () => {
+                if (!conversationId) return;
+                try {
+                  await setDisappearingMessages(conversationId, opt.value);
+                  setDisappearingTtl(opt.value);
+                  // Broadcast to peer
+                  callChannelRef.current?.send({
+                    type: 'broadcast',
+                    event: 'dm-settings-update',
+                    payload: { fromId: userId, disappearing_ttl: opt.value },
+                  }).catch(() => null);
+                } catch { /* ignore */ }
+                setShowDisappearingModal(false);
+              }}
+              style={[
+                styles.modalOption,
+                {
+                  backgroundColor: disappearingTtl === opt.value ? `${colors.primary}14` : colors.surfaceVariant,
+                  borderColor: disappearingTtl === opt.value ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.modalOptionText, { color: disappearingTtl === opt.value ? colors.primary : colors.text }]}>
+                {opt.label}
+              </Text>
+              {disappearingTtl === opt.value && (
+                <Ionicons name="checkmark" size={16} color={colors.primary} />
+              )}
+            </Pressable>
+          ))}
+        </View>
+      </Modal>
+
+      {/* Report User Modal */}
+      <Modal
+        visible={showReportModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowReportModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowReportModal(false)} />
+        <View style={[styles.modalSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+          <Text style={[styles.modalTitle, { color: colors.text }]}>Report {peerName}</Text>
+          <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+            Select a reason for your report.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {([
+              { label: 'Spam', value: 'spam' },
+              { label: 'Harassment', value: 'harassment' },
+              { label: 'Inappropriate content', value: 'inappropriate_content' },
+              { label: 'Hate speech', value: 'hate_speech' },
+              { label: 'Impersonation', value: 'impersonation' },
+              { label: 'Other', value: 'other' },
+            ] as { label: string; value: ReportReason }[]).map((opt) => (
+              <Pressable
+                key={opt.value}
+                onPress={() => setReportReason(opt.value)}
+                style={[
+                  styles.modalOption,
+                  {
+                    backgroundColor: reportReason === opt.value ? `${colors.wrong}14` : colors.surfaceVariant,
+                    borderColor: reportReason === opt.value ? colors.wrong : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.modalOptionText, { color: reportReason === opt.value ? colors.wrong : colors.text }]}>
+                  {opt.label}
+                </Text>
+                {reportReason === opt.value && (
+                  <Ionicons name="checkmark" size={16} color={colors.wrong} />
+                )}
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Pressable
+            onPress={async () => {
+              if (!peerId) return;
+              try {
+                await reportUser(peerId, reportReason, undefined, 'dm', conversationId);
+                setShowReportModal(false);
+                showAlert('Reported', 'Thank you for your report. We will review it shortly.');
+              } catch (e: any) {
+                showAlert('Error', e?.message ?? 'Could not submit report');
+              }
+            }}
+            style={[styles.reportSubmitBtn, { backgroundColor: colors.wrong }]}
+          >
+            <Text style={styles.reportSubmitText}>Submit Report</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -988,11 +1354,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerAvatarImage: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-  },
+  avatarWrap: { position: 'relative' },
+  headerAvatarImage: { width: 34, height: 34, borderRadius: 17 },
   headerAvatarFallback: {
     width: 34,
     height: 34,
@@ -1000,10 +1363,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerAvatarText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  headerAvatarText: { fontSize: 11, fontWeight: '700' },
+  onlineDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
   headerTitleWrap: { flex: 1 },
-  headerTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
-  headerSubtitle: { fontSize: fontSize.xs, marginTop: 2 },
+  headerTitle: { fontSize: 16, fontWeight: '700' },
+  headerSubtitle: { fontSize: 11, marginTop: 2 },
   headerActions: { flexDirection: 'row', gap: spacing.xs },
   headerActionBtn: {
     width: 32,
@@ -1019,27 +1392,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     gap: spacing.sm,
   },
-  callBarText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: fontSize.sm,
-    fontWeight: fontWeight.semibold,
-  },
+  callBarText: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '600' },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   body: { flex: 1 },
   log: { flex: 1 },
   logContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.md, gap: spacing.sm },
-  emptyText: { textAlign: 'center', paddingVertical: spacing.lg, fontSize: fontSize.sm },
-  msgRow: { gap: 4 },
-  bubble: {
-    maxWidth: '84%',
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  msgBody: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.5 },
-  msgTime: { fontSize: fontSize.xs },
+  emptyText: { textAlign: 'center', paddingVertical: spacing.lg, fontSize: 13 },
+  typingRow: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs },
+  typingText: { fontSize: 12, fontStyle: 'italic' },
   composer: {
     borderTopWidth: 1,
     paddingHorizontal: spacing.md,
@@ -1048,13 +1408,21 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     alignItems: 'center',
   },
+  composerIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: borderRadius.md,
+    borderRadius: 20,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    fontSize: fontSize.sm,
+    fontSize: 13,
+    maxHeight: 120,
   },
   sendBtn: {
     width: 40,
@@ -1063,4 +1431,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
+  modalSheet: {
+    maxHeight: '65%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+    gap: spacing.sm,
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: spacing.xs,
+  },
+  modalTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
+  modalSubtitle: { fontSize: fontSize.sm, marginBottom: spacing.xs },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  modalOptionText: { fontSize: fontSize.base },
+  reportSubmitBtn: {
+    marginTop: spacing.sm,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+  },
+  reportSubmitText: { color: '#fff', fontSize: fontSize.base, fontWeight: fontWeight.bold },
+  recordingRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  recordingTime: { flex: 1, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
 });
