@@ -3,9 +3,20 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+
+// Set at module level so it is registered before any cold-start notification routing
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 function RootNavigator() {
   const [session, setSession] = useState<Session | null>(null);

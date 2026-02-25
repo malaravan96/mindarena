@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
 
     // Get push tokens for those members
     const { data: tokens } = await supabase
-      .from('push_tokens')
+      .from('user_push_tokens')
       .select('expo_push_token')
       .in('user_id', memberIds);
 

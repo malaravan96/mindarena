@@ -16,8 +16,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { message_id } = await req.json();
-    if (!message_id) {
+    const raw = await req.json();
+
+    // Support both client-invoked ({ message_id }) and DB webhook ({ type, record }) formats
+    const messageId: string | null = raw.record?.id ?? raw.message_id ?? null;
+    if (!messageId) {
       return new Response(JSON.stringify({ error: 'message_id is required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -29,22 +32,29 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    const { data: message, error: messageError } = await supabase
-      .from('dm_messages')
-      .select('id, conversation_id, sender_id, body')
-      .eq('id', message_id)
-      .maybeSingle<{
-        id: string;
-        conversation_id: string;
-        sender_id: string;
-        body: string;
-      }>();
+    // When called from a DB webhook the record is already present — avoid an extra query
+    let message: { id: string; conversation_id: string; sender_id: string; body: string } | null = null;
+    if (
+      raw.record?.id &&
+      raw.record?.conversation_id &&
+      raw.record?.sender_id &&
+      typeof raw.record?.body === 'string'
+    ) {
+      message = raw.record as { id: string; conversation_id: string; sender_id: string; body: string };
+    } else {
+      const { data, error: messageError } = await supabase
+        .from('dm_messages')
+        .select('id, conversation_id, sender_id, body')
+        .eq('id', messageId)
+        .maybeSingle<{ id: string; conversation_id: string; sender_id: string; body: string }>();
 
-    if (messageError || !message) {
-      return new Response(JSON.stringify({ ok: true, sent: 0, reason: 'message-not-found' }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      if (messageError || !data) {
+        return new Response(JSON.stringify({ ok: true, sent: 0, reason: 'message-not-found' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      message = data;
     }
 
     const { data: convo } = await supabase

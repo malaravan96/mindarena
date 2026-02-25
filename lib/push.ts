@@ -4,15 +4,6 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { supabase } from '@/lib/supabase';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
 export async function registerForPushNotifications() {
   if ((Platform as any).OS === 'web') return null;
   if (!Device.isDevice) return null;

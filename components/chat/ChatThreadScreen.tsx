@@ -36,6 +36,7 @@ import {
   isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
 import { notifyDmMessage, notifyIncomingDmCall } from '@/lib/push';
+import { createPendingCall, getPendingCallForCallee, updatePendingCallStatus } from '@/lib/dmCalls';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
@@ -56,7 +57,7 @@ import { ScreenshotWarningBanner } from '@/components/chat/ScreenshotWarningBann
 type CallMode = 'audio' | 'video';
 type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
 
-const OUTGOING_CALL_TIMEOUT_MS = 30_000;
+const OUTGOING_CALL_TIMEOUT_MS = 60_000;
 const DM_SIGNAL_E2EE_ENABLED = true;
 const TYPING_RESET_MS = 4000;
 
@@ -114,6 +115,7 @@ export function ChatThreadScreen() {
   const [replyTarget, setReplyTarget] = useState<DmMessage | null>(null);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
+  const [pendingCallId, setPendingCallId] = useState<string | null>(null);
   const [outgoingMode, setOutgoingMode] = useState<CallMode | null>(null);
   const [activeCallMode, setActiveCallMode] = useState<CallMode>('audio');
   const [callState, setCallState] = useState<CallUiState>('off');
@@ -387,6 +389,16 @@ export function ChatThreadScreen() {
       const pending = consumePendingIncomingInvite(conversationId);
       if (pending) {
         setIncomingInvite({ fromId: pending.fromId, fromName: pending.fromName, mode: pending.mode });
+      }
+
+      // Cold-start path: if no in-memory invite was found, check the DB for a
+      // still-pending call (covers background/killed-app scenarios).
+      if (!pending) {
+        const pendingCall = await getPendingCallForCallee(conversationId, uid).catch(() => null);
+        if (pendingCall) {
+          setPendingCallId(pendingCall.id);
+          setIncomingInvite({ fromId: pendingCall.from_id, fromName: pendingCall.from_name, mode: pendingCall.mode });
+        }
       }
 
       const [{ data: me }, { data: conversation }] = await Promise.all([
@@ -1028,6 +1040,7 @@ export function ChatThreadScreen() {
     void notifyIncomingDmCall(conversationId, peerId, selfName, mode).catch((error) => {
       console.warn('DM call push notify failed', error);
     });
+    createPendingCall(conversationId, userId, peerId, selfName, mode).catch(() => null);
 
     clearOutgoingTimer();
     callInviteTimeoutRef.current = setTimeout(() => {
@@ -1051,6 +1064,10 @@ export function ChatThreadScreen() {
       return;
     }
     setIncomingInvite(null);
+    if (pendingCallId) {
+      updatePendingCallStatus(pendingCallId, 'accepted').catch(() => null);
+      setPendingCallId(null);
+    }
   }
 
   async function declineIncomingCall() {
@@ -1062,6 +1079,10 @@ export function ChatThreadScreen() {
       toId: incomingInvite.fromId,
     });
     setIncomingInvite(null);
+    if (pendingCallId) {
+      updatePendingCallStatus(pendingCallId, 'declined').catch(() => null);
+      setPendingCallId(null);
+    }
   }
 
   function toggleMute() {
