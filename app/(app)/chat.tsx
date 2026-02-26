@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable,
+         ActivityIndicator, Image, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,10 +34,14 @@ export default function ChatScreen() {
   const [targets, setTargets] = useState<MessageTarget[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ConnectionWithProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'dms' | 'groups'>('all');
+  const [refreshing, setRefreshing] = useState(false);
 
   const titleCount = useMemo(
-    () => conversations.reduce((sum, item) => sum + item.unread_count, 0),
-    [conversations],
+    () =>
+      conversations.reduce((sum, c) => sum + c.unread_count, 0) +
+      groups.reduce((sum, g) => sum + (g.unread_count ?? 0), 0),
+    [conversations, groups],
   );
 
   const filteredConversations = useMemo(() => {
@@ -100,6 +105,11 @@ export default function ChatScreen() {
           { event: '*', schema: 'public', table: 'user_connections' },
           () => loadData(uid),
         )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'group_messages' },
+          () => loadData(uid),
+        )
         .subscribe();
     })();
 
@@ -126,34 +136,105 @@ export default function ChatScreen() {
   );
 
   async function openConversation(peerUserId: string) {
-    const id = await getOrCreateConversation(peerUserId);
-    router.push({ pathname: '/chat-thread', params: { conversationId: id } });
+    try {
+      const id = await getOrCreateConversation(peerUserId);
+      router.push({ pathname: '/chat-thread', params: { conversationId: id } });
+    } catch {
+      if (userId) loadData(userId);
+    }
   }
 
-  const formatPreviewTime = (iso: string) => {
+  function smartFormatTime(iso: string | null | undefined): string {
+    if (!iso) return '';
     const date = new Date(iso);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+    const startOfWeek = new Date(startOfToday.getTime() - 6 * 86400000);
+    if (date >= startOfToday)
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (date >= startOfYesterday) return 'Yesterday';
+    if (date >= startOfWeek) return date.toLocaleDateString([], { weekday: 'short' });
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  function renderAvatarWithDot(
+    avatarUrl: string | null | undefined,
+    name: string,
+    isOnline: boolean | undefined,
+  ) {
+    return (
+      <View style={styles.avatarWrap}>
+        {avatarUrl ? (
+          <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: `${colors.primary}20` }]}>
+            <Text style={[styles.avatarText, { color: colors.primary }]}>
+              {(name || 'P').slice(0, 2).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <View
+          style={[
+            styles.onlineDot,
+            {
+              backgroundColor: isOnline ? '#22c55e' : colors.textTertiary,
+              borderColor: colors.surface,
+            },
+          ]}
+        />
+      </View>
+    );
+  }
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const uid = userId ?? (await getCurrentUserId());
+      if (uid) {
+        if (!userId) setUserId(uid);
+        await loadData(uid);
+        refreshUnread();
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [userId, loadData, refreshUnread]);
+
+  const showDms = activeTab === 'all' || activeTab === 'dms';
+  const showGroups = activeTab === 'all' || activeTab === 'groups';
+  const hasDms = filteredConversations.length > 0;
+  const hasGroups = filteredGroups.length > 0;
+  const hasTargets = targets.length > 0;
+  const isCompletelyEmpty =
+    !loading &&
+    conversations.length === 0 &&
+    groups.length === 0 &&
+    targets.length === 0 &&
+    pendingRequests.length === 0;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Chat</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-          <View style={[styles.unreadPill, { backgroundColor: `${colors.primary}16` }]}>
-            <Ionicons name="mail-unread-outline" size={13} color={colors.primary} />
-            <Text style={[styles.unreadPillText, { color: colors.primary }]}>{titleCount} unread</Text>
-          </View>
+          {titleCount > 0 && (
+            <View style={[styles.unreadPill, { backgroundColor: `${colors.primary}16` }]}>
+              <Ionicons name="mail-unread-outline" size={13} color={colors.primary} />
+              <Text style={[styles.unreadPillText, { color: colors.primary }]}>{titleCount} unread</Text>
+            </View>
+          )}
           <Pressable
             onPress={() => router.push('/create-group')}
-            style={[styles.newGroupBtn, { backgroundColor: `${colors.secondary}16` }]}
+            style={[styles.iconBtn, { backgroundColor: `${colors.secondary}16` }]}
           >
-            <Ionicons name="people-outline" size={15} color={colors.secondary} />
-            <Text style={[styles.newGroupText, { color: colors.secondary }]}>New Group</Text>
+            <Ionicons name="people-outline" size={18} color={colors.secondary} />
           </Pressable>
         </View>
       </View>
 
+      {/* Search bar */}
       <View style={[styles.searchWrap, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}>
         <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
         <TextInput
@@ -171,12 +252,49 @@ export default function ChatScreen() {
         )}
       </View>
 
+      {/* Filter Tabs */}
+      <View style={styles.tabRow}>
+        {(['all', 'dms', 'groups'] as const).map((tab) => (
+          <Pressable
+            key={tab}
+            onPress={() => setActiveTab(tab)}
+            style={[
+              styles.tabPill,
+              activeTab === tab
+                ? { backgroundColor: colors.primary }
+                : { backgroundColor: colors.surfaceVariant, borderColor: colors.border, borderWidth: 1 },
+            ]}
+          >
+            <Text
+              style={[
+                styles.tabPillText,
+                { color: activeTab === tab ? '#fff' : colors.textSecondary },
+              ]}
+            >
+              {tab === 'all' ? 'All' : tab === 'dms' ? 'DMs' : 'Groups'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          {/* Chat Requests */}
           {pendingRequests.length > 0 && (
             <Card style={styles.blockCard} padding="md">
               <Text style={[styles.sectionLabel, { color: colors.text }]}>Chat Requests</Text>
@@ -229,131 +347,202 @@ export default function ChatScreen() {
             </Card>
           )}
 
-          <Card style={styles.blockCard} padding="md">
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Recent Conversations</Text>
-            {filteredConversations.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {searchQuery ? 'No matching conversations.' : 'No conversations yet.'}
-              </Text>
-            ) : (
-              filteredConversations.map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() =>
-                    router.push({ pathname: '/chat-thread', params: { conversationId: item.id } })
-                  }
-                  style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
-                >
-                  <View style={styles.avatarWrap}>
-                    {item.peer_avatar_url ? (
-                      <Image source={{ uri: item.peer_avatar_url }} style={styles.avatarImage} />
-                    ) : (
-                      <View style={[styles.avatar, { backgroundColor: `${colors.primary}16` }]}>
-                        <Text style={[styles.avatarText, { color: colors.primary }]}>
-                          {(item.peer_name || 'P').slice(0, 2).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                    {item.peer_is_online && (
-                      <View style={[styles.onlineDot, { backgroundColor: '#22c55e', borderColor: colors.surfaceVariant }]} />
-                    )}
-                  </View>
-
-                  <View style={styles.rowMain}>
-                    <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
-                      {item.peer_name}
-                    </Text>
-                    <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {item.last_message || 'Say hi'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.rowRight}>
-                    <Text style={[styles.rowTime, { color: colors.textTertiary }]}>
-                      {formatPreviewTime(item.last_message_at)}
-                    </Text>
-                    {item.unread_count > 0 && (
-                      <View style={[styles.badge, { backgroundColor: colors.wrong }]}>
-                        <Text style={styles.badgeText}>{item.unread_count > 99 ? '99+' : item.unread_count}</Text>
-                      </View>
-                    )}
-                  </View>
-                </Pressable>
-              ))
-            )}
-          </Card>
-
-          {filteredGroups.length > 0 && (
+          {/* Direct Messages — BUG FIX: renders filteredConversations */}
+          {showDms && (
             <Card style={styles.blockCard} padding="md">
-              <Text style={[styles.sectionLabel, { color: colors.text }]}>Group Chats</Text>
-              {filteredGroups.map((group) => (
-                <Pressable
-                  key={group.id}
-                  onPress={() => router.push({ pathname: '/group-chat', params: { groupId: group.id } })}
-                  style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
-                >
-                  {group.avatar_url ? (
-                    <Image source={{ uri: group.avatar_url }} style={styles.avatarImage} />
-                  ) : (
-                    <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
-                      <Text style={[styles.avatarText, { color: colors.secondary }]}>
-                        {(group.name || 'G').slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Direct Messages</Text>
+              {hasDms
+                ? filteredConversations.map((conv) => {
+                    const isUnread = conv.unread_count > 0;
+                    return (
+                      <Pressable
+                        key={conv.id}
+                        onPress={() =>
+                          router.push({ pathname: '/chat-thread', params: { conversationId: conv.id } })
+                        }
+                        style={[
+                          styles.row,
+                          {
+                            borderColor: isUnread ? `${colors.primary}40` : colors.border,
+                            backgroundColor: isUnread ? `${colors.primary}08` : colors.surfaceVariant,
+                          },
+                        ]}
+                      >
+                        {renderAvatarWithDot(conv.peer_avatar_url, conv.peer_name, conv.peer_is_online)}
+                        <View style={styles.rowMain}>
+                          <Text
+                            style={[
+                              styles.rowTitle,
+                              {
+                                color: colors.text,
+                                fontWeight: isUnread ? fontWeight.bold : fontWeight.semibold,
+                              },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {conv.peer_name}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.rowSubtitle,
+                              {
+                                color: isUnread ? colors.textSecondary : colors.textTertiary,
+                                fontWeight: isUnread ? fontWeight.medium : fontWeight.normal,
+                              },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {conv.last_message || '[Encrypted]'}
+                          </Text>
+                        </View>
+                        <View style={styles.rowRight}>
+                          <Text style={[styles.rowTime, { color: colors.textTertiary }]}>
+                            {smartFormatTime(conv.last_message_at)}
+                          </Text>
+                          {isUnread && (
+                            <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+                              <Text style={styles.badgeText}>
+                                {conv.unread_count > 99 ? '99+' : conv.unread_count}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                : conversations.length === 0
+                  ? (
+                    <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
+                      No direct messages yet. Start a conversation below.
+                    </Text>
+                  )
+                  : (
+                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                      No chats matching "{searchQuery.trim()}"
+                    </Text>
                   )}
-                  <View style={styles.rowMain}>
-                    <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
-                      {group.name}
-                    </Text>
-                    <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {group.last_message || `${group.member_count ?? '?'} members`}
-                    </Text>
-                  </View>
-                  <View style={styles.rowRight}>
-                    <Text style={[styles.rowTime, { color: colors.textTertiary }]}>
-                      {formatPreviewTime(group.last_message_at)}
-                    </Text>
-                    {(group.unread_count ?? 0) > 0 && (
-                      <View style={[styles.badge, { backgroundColor: colors.secondary }]}>
-                        <Text style={styles.badgeText}>{(group.unread_count ?? 0) > 99 ? '99+' : group.unread_count}</Text>
-                      </View>
-                    )}
-                  </View>
-                </Pressable>
-              ))}
             </Card>
           )}
 
-          <Card style={styles.blockCard} padding="md">
-            <Text style={[styles.sectionLabel, { color: colors.text }]}>Connected Players</Text>
-            {targets.map((peer) => (
-              <Pressable
-                key={peer.id}
-                onPress={() => openConversation(peer.id)}
-                style={[styles.row, { borderColor: colors.border, backgroundColor: colors.surface }]}
+          {/* Group Chats */}
+          {showGroups && hasGroups && (
+            <Card style={styles.blockCard} padding="md">
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Group Chats</Text>
+              {filteredGroups.map((group) => {
+                const unread = (group.unread_count ?? 0) > 0;
+                return (
+                  <Pressable
+                    key={group.id}
+                    onPress={() => router.push({ pathname: '/group-chat', params: { groupId: group.id } })}
+                    style={[
+                      styles.row,
+                      {
+                        borderColor: unread ? `${colors.secondary}40` : colors.border,
+                        backgroundColor: unread ? `${colors.secondary}08` : colors.surfaceVariant,
+                      },
+                    ]}
+                  >
+                    {group.avatar_url ? (
+                      <Image source={{ uri: group.avatar_url }} style={styles.avatarImage} />
+                    ) : (
+                      <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
+                        <Text style={[styles.avatarText, { color: colors.secondary }]}>
+                          {(group.name || 'G').slice(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.rowMain}>
+                      <Text
+                        style={[
+                          styles.rowTitle,
+                          {
+                            color: colors.text,
+                            fontWeight: unread ? fontWeight.bold : fontWeight.semibold,
+                          },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {group.name}
+                      </Text>
+                      <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {group.last_message || `${group.member_count ?? '?'} members`}
+                      </Text>
+                    </View>
+                    <View style={styles.rowRight}>
+                      <Text style={[styles.rowTime, { color: colors.textTertiary }]}>
+                        {smartFormatTime(group.last_message_at)}
+                      </Text>
+                      {unread && (
+                        <View style={[styles.badge, { backgroundColor: colors.secondary }]}>
+                          <Text style={styles.badgeText}>
+                            {(group.unread_count ?? 0) > 99 ? '99+' : group.unread_count}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </Card>
+          )}
+
+          {/* Start a Conversation — horizontal chip scroll */}
+          {showDms && hasTargets && (
+            <View style={styles.newDmSection}>
+              <Text
+                style={[
+                  styles.sectionLabel,
+                  { color: colors.text, marginBottom: spacing.xs, paddingHorizontal: spacing.sm },
+                ]}
               >
-                {peer.avatar_url ? (
-                  <Image source={{ uri: peer.avatar_url }} style={styles.avatarImage} />
-                ) : (
-                  <View style={[styles.avatar, { backgroundColor: `${colors.secondary}16` }]}>
-                    <Text style={[styles.avatarText, { color: colors.secondary }]}>
-                      {(peer.display_name || peer.username || 'P').slice(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.rowMain}>
-                  <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
-                    {peer.display_name || peer.username || 'Player'}
-                  </Text>
-                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>Tap to send message</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-              </Pressable>
-            ))}
-            {!userId && (
-              <Text style={[styles.emptyText, { color: colors.warning }]}>Sign in to use messaging.</Text>
-            )}
-          </Card>
+                Start a Conversation
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+              >
+                {targets.map((peer) => {
+                  const name = peer.display_name || peer.username || 'Player';
+                  return (
+                    <Pressable key={peer.id} onPress={() => openConversation(peer.id)} style={styles.avatarChip}>
+                      {peer.avatar_url ? (
+                        <Image source={{ uri: peer.avatar_url }} style={styles.chipAvatar} />
+                      ) : (
+                        <View style={[styles.chipAvatarPlaceholder, { backgroundColor: `${colors.primary}20` }]}>
+                          <Text style={[styles.chipAvatarText, { color: colors.primary }]}>
+                            {name.slice(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <Text
+                        style={[styles.chipName, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {name.split(' ')[0]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Global empty state */}
+          {isCompletelyEmpty && !searchQuery && (
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubbles-outline" size={56} color={colors.textTertiary} />
+              <Text style={[styles.emptyStateTitle, { color: colors.text }]}>No Chats Yet</Text>
+              <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>
+                Connect with other players to start messaging.
+              </Text>
+            </View>
+          )}
+
+          {/* Sign in warning */}
+          {!userId && (
+            <Text style={[styles.emptyText, { color: colors.warning }]}>Sign in to use messaging.</Text>
+          )}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -379,6 +568,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   unreadPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   searchWrap: {
     flexDirection: 'row',
@@ -392,6 +588,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   searchInput: { flex: 1, fontSize: fontSize.sm, paddingVertical: 2 },
+  tabRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  tabPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+  },
+  tabPillText: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   scrollContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl, gap: spacing.md },
   blockCard: { borderRadius: borderRadius.xl },
   sectionLabel: { fontSize: fontSize.base, fontWeight: fontWeight.bold, marginBottom: spacing.sm },
@@ -429,15 +637,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 2,
   },
-  newGroupBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  newGroupText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   rowMain: { flex: 1 },
   rowTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
   rowSubtitle: { fontSize: fontSize.sm, marginTop: 2 },
@@ -460,4 +659,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   requestBtnText: { color: '#fff', fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  newDmSection: { gap: spacing.xs },
+  chipRow: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: spacing.md,
+    flexDirection: 'row',
+  },
+  avatarChip: { alignItems: 'center', gap: spacing.xs, width: 60 },
+  chipAvatar: { width: 48, height: 48, borderRadius: 24 },
+  chipAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipAvatarText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
+  chipName: { fontSize: fontSize.xs, textAlign: 'center', maxWidth: 56 },
+  emptyState: { alignItems: 'center', paddingVertical: spacing.xl * 2, gap: spacing.sm },
+  emptyStateTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
+  emptyStateSubtitle: {
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+    paddingHorizontal: spacing.xl,
+  },
 });

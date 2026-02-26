@@ -7,7 +7,9 @@ import {
   Pressable,
   ActivityIndicator,
   Image,
+  ImageBackground,
   Platform,
+  Keyboard,
   KeyboardAvoidingView,
   FlatList,
   Modal,
@@ -39,6 +41,7 @@ import { notifyDmMessage, notifyIncomingDmCall } from '@/lib/push';
 import { createPendingCall, getPendingCallForCallee, updatePendingCallStatus } from '@/lib/dmCalls';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
+import { getItem, setItem } from '@/lib/storage';
 import { DmWebRTCCall } from '@/lib/webrtcCall';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import * as ImagePicker from 'expo-image-picker';
@@ -125,6 +128,9 @@ export function ChatThreadScreen() {
   const [forwardingMessage, setForwardingMessage] = useState<DmMessage | null>(null);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+  const [chatWallpaper, setChatWallpaper] = useState<{ type: 'color' | 'image'; value: string } | null>(null);
+  const [showWallpaperPicker, setShowWallpaperPicker] = useState(false);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
   const [pendingCallId, setPendingCallId] = useState<string | null>(null);
@@ -139,6 +145,7 @@ export function ChatThreadScreen() {
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState(56);
   const [callOverlayMinimized, setCallOverlayMinimized] = useState(false);
+  const [androidKbHeight, setAndroidKbHeight] = useState(0);
 
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const callRef = useRef<DmWebRTCCall | null>(null);
@@ -155,6 +162,15 @@ export function ChatThreadScreen() {
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { peerIdRef.current = peerId; }, [peerId]);
   useEffect(() => { conversationIdRef.current = conversationId ?? null; }, [conversationId]);
+
+  // Load persisted wallpaper for this conversation
+  useEffect(() => {
+    if (!conversationId) return;
+    getItem(`chat_wallpaper_${conversationId}`).then((raw) => {
+      if (!raw) return;
+      try { setChatWallpaper(JSON.parse(raw)); } catch { /* ignore */ }
+    });
+  }, [conversationId]);
 
   // Register this thread as the active conversation so global overlays are suppressed
   useEffect(() => {
@@ -1275,10 +1291,26 @@ export function ChatThreadScreen() {
     ? `Last seen ${formatLastSeen(peerLastSeen)}`
     : 'Direct message';
 
+  // Android: KeyboardAvoidingView is broken with New Architecture + edge-to-edge.
+  // Track keyboard height manually and apply it as paddingBottom to the body.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => {
+      setAndroidKbHeight(e.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKbHeight(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={() => router.replace('/chat')} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={18} color={colors.text} />
         </Pressable>
         <View style={styles.avatarWrap}>
@@ -1302,99 +1334,36 @@ export function ChatThreadScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable
-            onPress={() => setShowSearch(true)}
-            style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
-          >
-            <Ionicons name="search-outline" size={16} color={colors.primary} />
-          </Pressable>
-          {pinnedMessages.length > 0 && (
-            <Pressable
-              onPress={() => setShowPinnedSheet(true)}
-              style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
-            >
-              <Ionicons name="pin" size={16} color={colors.primary} />
-            </Pressable>
-          )}
+          {/* Audio call — always visible */}
           <Pressable
             onPress={() => void startCall('audio')}
             disabled={callStartDisabled || isBlockedState}
             style={[
               styles.headerActionBtn,
-              {
-                opacity: callStartDisabled || isBlockedState ? 0.45 : 1,
-                backgroundColor: `${colors.primary}14`,
-              },
+              { opacity: callStartDisabled || isBlockedState ? 0.45 : 1, backgroundColor: `${colors.primary}14` },
             ]}
           >
-            <Ionicons name="call-outline" size={16} color={colors.primary} />
+            <Ionicons name="call-outline" size={18} color={colors.primary} />
           </Pressable>
+
+          {/* Video call — always visible */}
           <Pressable
             onPress={() => void startCall('video')}
             disabled={callStartDisabled || isBlockedState}
             style={[
               styles.headerActionBtn,
-              {
-                opacity: callStartDisabled || isBlockedState ? 0.45 : 1,
-                backgroundColor: `${colors.secondary}14`,
-              },
+              { opacity: callStartDisabled || isBlockedState ? 0.45 : 1, backgroundColor: `${colors.secondary}14` },
             ]}
           >
-            <Ionicons name="videocam-outline" size={16} color={colors.secondary} />
+            <Ionicons name="videocam-outline" size={18} color={colors.secondary} />
           </Pressable>
+
+          {/* 3-dot overflow menu trigger */}
           <Pressable
-            onPress={async () => {
-              if (!peerId) return;
-              if (isBlockedState) {
-                const confirmed = await showConfirm(
-                  'Unblock User',
-                  `Unblock ${peerName}? You'll need to reconnect before messaging.`,
-                  'Unblock',
-                );
-                if (!confirmed) return;
-                try {
-                  await unblockUser(peerId);
-                  setIsBlockedState(false);
-                } catch { /* ignore */ }
-              } else {
-                const confirmed = await showConfirm(
-                  'Block User',
-                  `Block ${peerName}? You won't be able to send or receive messages.`,
-                  'Block',
-                );
-                if (!confirmed) return;
-                try {
-                  await blockUser(peerId);
-                  setIsBlockedState(true);
-                } catch { /* ignore */ }
-              }
-            }}
-            style={[
-              styles.headerActionBtn,
-              { backgroundColor: isBlockedState ? `${colors.warning}14` : `${colors.wrong}14` },
-            ]}
-          >
-            <Ionicons
-              name={isBlockedState ? 'ban' : 'ban-outline'}
-              size={16}
-              color={isBlockedState ? colors.warning : colors.wrong}
-            />
-          </Pressable>
-          <Pressable
-            onPress={() => setShowDisappearingModal(true)}
+            onPress={() => setShowOverflowMenu(true)}
             style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
           >
-            <Ionicons
-              name={disappearingTtl ? 'timer' : 'timer-outline'}
-              size={16}
-              color={disappearingTtl ? colors.primary : colors.textSecondary}
-            />
-          </Pressable>
-          <Pressable
-            onPress={() => setShowReportModal(true)}
-            style={[styles.headerActionBtn, { backgroundColor: `${colors.wrong}10` }]}
-          >
-            <Ionicons name="flag-outline" size={16} color={colors.wrong} />
+            <Ionicons name="ellipsis-vertical" size={18} color={colors.text} />
           </Pressable>
         </View>
       </View>
@@ -1442,10 +1411,18 @@ export function ChatThreadScreen() {
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
+        <View style={[{ flex: 1 }, chatWallpaper?.type === 'color' ? { backgroundColor: chatWallpaper.value } : {}]}>
+          {chatWallpaper?.type === 'image' ? (
+            <ImageBackground
+              source={{ uri: chatWallpaper.value }}
+              style={StyleSheet.absoluteFillObject}
+              resizeMode="cover"
+            />
+          ) : null}
         <KeyboardAvoidingView
-          style={styles.body}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          style={[styles.body, Platform.OS === 'android' ? { paddingBottom: androidKbHeight } : null]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={8}
         >
           <FlatList
             ref={messageListRef}
@@ -1516,7 +1493,7 @@ export function ChatThreadScreen() {
               {
                 borderTopColor: colors.border,
                 backgroundColor: colors.surface,
-                paddingBottom: Math.max(insets.bottom, spacing.sm),
+                paddingBottom: androidKbHeight > 0 ? spacing.sm : Math.max(insets.bottom, spacing.sm),
               },
             ]}
             onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
@@ -1600,6 +1577,7 @@ export function ChatThreadScreen() {
             )}
           </View>
         </KeyboardAvoidingView>
+        </View>
       )}
 
       <EmojiPicker
@@ -1729,6 +1707,239 @@ export function ChatThreadScreen() {
               )}
             </Pressable>
           ))}
+        </View>
+      </Modal>
+
+      {/* Overflow Menu */}
+      <Modal
+        visible={showOverflowMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOverflowMenu(false)}
+      >
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => setShowOverflowMenu(false)}
+        >
+          <View
+            style={[
+              styles.overflowMenu,
+              { backgroundColor: colors.surface, shadowColor: '#000' },
+            ]}
+          >
+            {/* Search */}
+            <Pressable
+              style={styles.overflowMenuItem}
+              onPress={() => { setShowOverflowMenu(false); setShowSearch(true); }}
+            >
+              <Ionicons name="search-outline" size={18} color={colors.primary} />
+              <Text style={[styles.overflowMenuLabel, { color: colors.text }]}>Search</Text>
+            </Pressable>
+
+            <View style={[styles.overflowMenuDivider, { backgroundColor: colors.border }]} />
+
+            {/* Pinned Messages */}
+            <Pressable
+              style={[styles.overflowMenuItem, pinnedMessages.length === 0 && { opacity: 0.4 }]}
+              onPress={() => {
+                if (pinnedMessages.length === 0) return;
+                setShowOverflowMenu(false);
+                setShowPinnedSheet(true);
+              }}
+            >
+              <Ionicons name="pin-outline" size={18} color={colors.primary} />
+              <Text style={[styles.overflowMenuLabel, { color: colors.text }]}>
+                Pinned Messages{pinnedMessages.length > 0 ? ` (${pinnedMessages.length})` : ''}
+              </Text>
+            </Pressable>
+
+            <View style={[styles.overflowMenuDivider, { backgroundColor: colors.border }]} />
+
+            {/* Disappearing Messages */}
+            <Pressable
+              style={styles.overflowMenuItem}
+              onPress={() => { setShowOverflowMenu(false); setShowDisappearingModal(true); }}
+            >
+              <Ionicons
+                name={disappearingTtl ? 'timer' : 'timer-outline'}
+                size={18}
+                color={disappearingTtl ? colors.primary : colors.textSecondary}
+              />
+              <Text style={[styles.overflowMenuLabel, { color: colors.text }]}>
+                Disappearing Messages{disappearingTtl ? ' (On)' : ''}
+              </Text>
+            </Pressable>
+
+            <View style={[styles.overflowMenuDivider, { backgroundColor: colors.border }]} />
+
+            {/* Block / Unblock */}
+            <Pressable
+              style={styles.overflowMenuItem}
+              onPress={async () => {
+                setShowOverflowMenu(false);
+                if (!peerId) return;
+                if (isBlockedState) {
+                  const confirmed = await showConfirm(
+                    'Unblock User',
+                    `Unblock ${peerName}? You'll need to reconnect before messaging.`,
+                    'Unblock',
+                  );
+                  if (!confirmed) return;
+                  try { await unblockUser(peerId); setIsBlockedState(false); } catch { /* ignore */ }
+                } else {
+                  const confirmed = await showConfirm(
+                    'Block User',
+                    `Block ${peerName}? You won't be able to send or receive messages.`,
+                    'Block',
+                  );
+                  if (!confirmed) return;
+                  try { await blockUser(peerId); setIsBlockedState(true); } catch { /* ignore */ }
+                }
+              }}
+            >
+              <Ionicons
+                name={isBlockedState ? 'ban' : 'ban-outline'}
+                size={18}
+                color={isBlockedState ? colors.warning : colors.wrong}
+              />
+              <Text style={[styles.overflowMenuLabel, { color: isBlockedState ? colors.warning : colors.wrong }]}>
+                {isBlockedState ? 'Unblock' : 'Block'} {peerName}
+              </Text>
+            </Pressable>
+
+            <View style={[styles.overflowMenuDivider, { backgroundColor: colors.border }]} />
+
+            {/* Report */}
+            <Pressable
+              style={styles.overflowMenuItem}
+              onPress={() => { setShowOverflowMenu(false); setShowReportModal(true); }}
+            >
+              <Ionicons name="flag-outline" size={18} color={colors.wrong} />
+              <Text style={[styles.overflowMenuLabel, { color: colors.wrong }]}>Report</Text>
+            </Pressable>
+
+            <View style={[styles.overflowMenuDivider, { backgroundColor: colors.border }]} />
+
+            {/* Wallpaper */}
+            <Pressable
+              style={styles.overflowMenuItem}
+              onPress={() => { setShowOverflowMenu(false); setShowWallpaperPicker(true); }}
+            >
+              <Ionicons name="color-palette-outline" size={18} color={colors.primary} />
+              <Text style={[styles.overflowMenuLabel, { color: colors.text }]}>
+                Chat Wallpaper{chatWallpaper ? ' (Set)' : ''}
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Wallpaper Picker Modal */}
+      <Modal
+        visible={showWallpaperPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWallpaperPicker(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowWallpaperPicker(false)} />
+        <View style={[styles.modalSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+          <Text style={[styles.modalTitle, { color: colors.text }]}>Chat Wallpaper</Text>
+          <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+            Choose a color or pick an image from your gallery.
+          </Text>
+
+          {/* Color presets */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 4 }}>
+              {[
+                { label: 'Default', color: null },
+                { label: 'Midnight', color: '#0a0a1a' },
+                { label: 'Ocean', color: '#0d2137' },
+                { label: 'Forest', color: '#0d1f16' },
+                { label: 'Berry', color: '#1a0d2e' },
+                { label: 'Rose', color: '#2d0d1a' },
+                { label: 'Caramel', color: '#2b1a0d' },
+                { label: 'Slate', color: '#1e293b' },
+                { label: 'Warm White', color: '#f5f0e8' },
+              ].map(({ label, color }) => {
+                const isSelected = color === null
+                  ? chatWallpaper === null
+                  : chatWallpaper?.type === 'color' && chatWallpaper.value === color;
+                return (
+                  <Pressable
+                    key={label}
+                    onPress={async () => {
+                      const next = color === null ? null : { type: 'color' as const, value: color };
+                      setChatWallpaper(next);
+                      if (conversationId) {
+                        await setItem(`chat_wallpaper_${conversationId}`, next === null ? '' : JSON.stringify(next));
+                      }
+                      setShowWallpaperPicker(false);
+                    }}
+                    style={{
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 52,
+                        height: 52,
+                        borderRadius: 26,
+                        backgroundColor: color ?? colors.surfaceVariant,
+                        borderWidth: isSelected ? 3 : 1.5,
+                        borderColor: isSelected ? colors.primary : colors.border,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {color === null && <Ionicons name="close" size={20} color={colors.textSecondary} />}
+                      {isSelected && color !== null && <Ionicons name="checkmark" size={20} color="#fff" />}
+                    </View>
+                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
+
+          {/* Pick from gallery */}
+          <Pressable
+            onPress={async () => {
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.85,
+              });
+              if (result.canceled || !result.assets[0]) return;
+              const uri = result.assets[0].uri;
+              const next = { type: 'image' as const, value: uri };
+              setChatWallpaper(next);
+              if (conversationId) {
+                await setItem(`chat_wallpaper_${conversationId}`, JSON.stringify(next));
+              }
+              setShowWallpaperPicker(false);
+            }}
+            style={[styles.modalOption, { backgroundColor: `${colors.primary}10`, borderColor: colors.primary, flexDirection: 'row', gap: 10 }]}
+          >
+            <Ionicons name="image-outline" size={20} color={colors.primary} />
+            <Text style={[styles.modalOptionText, { color: colors.primary }]}>Choose from Gallery</Text>
+          </Pressable>
+
+          {chatWallpaper && (
+            <Pressable
+              onPress={async () => {
+                setChatWallpaper(null);
+                if (conversationId) await setItem(`chat_wallpaper_${conversationId}`, '');
+                setShowWallpaperPicker(false);
+              }}
+              style={[styles.modalOption, { backgroundColor: `${colors.wrong}10`, borderColor: colors.wrong, flexDirection: 'row', gap: 10 }]}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.wrong} />
+              <Text style={[styles.modalOptionText, { color: colors.wrong }]}>Remove Wallpaper</Text>
+            </Pressable>
+          )}
         </View>
       </Modal>
 
@@ -1964,5 +2175,31 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  overflowMenu: {
+    position: 'absolute',
+    top: 60,
+    right: 12,
+    borderRadius: 12,
+    paddingVertical: 6,
+    minWidth: 210,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  overflowMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  overflowMenuLabel: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  overflowMenuDivider: {
+    height: 1,
+    marginHorizontal: 12,
   },
 });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -6,6 +6,8 @@ import {
   ScrollView,
   Pressable,
   StyleSheet,
+  Animated,
+  Easing,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
@@ -45,6 +47,31 @@ const EMOJI_CATEGORIES: { label: string; emojis: string[] }[] = [
   },
 ];
 
+interface AnimatedEmojiProps {
+  emoji: string;
+  onPress: () => void;
+}
+
+const AnimatedEmoji = React.memo(function AnimatedEmoji({ emoji, onPress }: AnimatedEmojiProps) {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, { toValue: 0.72, useNativeDriver: true, tension: 200, friction: 8 }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 120, friction: 6 }).start();
+  };
+
+  return (
+    <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} style={styles.emojiBtn}>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+        <Text style={styles.emojiText}>{emoji}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+});
+
 interface EmojiPickerProps {
   visible: boolean;
   onSelect: (emoji: string) => void;
@@ -53,6 +80,24 @@ interface EmojiPickerProps {
 
 export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
   const { colors } = useTheme();
+
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const contentTranslateY = useRef(new Animated.Value(16)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.timing(contentOpacity, { toValue: 1, duration: 280, delay: 80, useNativeDriver: true }),
+        Animated.timing(contentTranslateY, {
+          toValue: 0, duration: 320, delay: 80,
+          easing: Easing.out(Easing.cubic), useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      contentOpacity.setValue(0);
+      contentTranslateY.setValue(16);
+    }
+  }, [visible, contentOpacity, contentTranslateY]);
 
   return (
     <Modal
@@ -64,27 +109,24 @@ export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {EMOJI_CATEGORIES.map((cat) => (
-            <View key={cat.label} style={styles.category}>
-              <Text style={[styles.catLabel, { color: colors.textSecondary }]}>{cat.label}</Text>
-              <View style={styles.emojiGrid}>
-                {cat.emojis.map((emoji) => (
-                  <Pressable
-                    key={emoji}
-                    onPress={() => {
-                      onSelect(emoji);
-                      onClose();
-                    }}
-                    style={styles.emojiBtn}
-                  >
-                    <Text style={styles.emojiText}>{emoji}</Text>
-                  </Pressable>
-                ))}
+        <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            {EMOJI_CATEGORIES.map((cat) => (
+              <View key={cat.label} style={styles.category}>
+                <Text style={[styles.catLabel, { color: colors.textSecondary }]}>{cat.label}</Text>
+                <View style={styles.emojiGrid}>
+                  {cat.emojis.map((emoji) => (
+                    <AnimatedEmoji
+                      key={emoji}
+                      emoji={emoji}
+                      onPress={() => { onSelect(emoji); onClose(); }}
+                    />
+                  ))}
+                </View>
               </View>
-            </View>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        </Animated.View>
       </View>
     </Modal>
   );
