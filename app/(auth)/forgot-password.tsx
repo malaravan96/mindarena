@@ -6,6 +6,7 @@ import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { AUTH_CORAL } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
@@ -34,13 +35,10 @@ export default function ForgotPassword() {
 
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
-
       if (resetError) throw resetError;
-
       setStep('otp');
       showAlert('Code Sent!', 'We sent a 6-digit verification code to your email.');
     } catch (e: any) {
-      console.error('Send code error:', e);
       setError(e?.message || 'Something went wrong. Please try again.');
       showAlert('Failed to Send Code', e?.message || 'Could not send verification code. Please try again.');
     } finally {
@@ -70,7 +68,6 @@ export default function ForgotPassword() {
       showAlert('Verified!', 'Code verified successfully. Set your new password.');
       router.replace('/(auth)/reset-password');
     } catch (e: any) {
-      console.error('OTP verification error:', e);
       setError(e?.message || 'Invalid or expired code. Please try again.');
       showAlert('Verification Failed', e?.message || 'Invalid or expired code. Please try again.');
     } finally {
@@ -88,8 +85,7 @@ export default function ForgotPassword() {
         newOtp[i] = digits[i] || '';
       }
       setOtp(newOtp);
-      const focusIndex = Math.min(digits.length, OTP_LENGTH - 1);
-      otpRefs.current[focusIndex]?.focus();
+      otpRefs.current[Math.min(digits.length, OTP_LENGTH - 1)]?.focus();
       return;
     }
 
@@ -127,16 +123,14 @@ export default function ForgotPassword() {
     }
   }
 
-  const heroTitle = step === 'email' ? 'Reset password' : 'Enter code';
-  const heroSubtitle =
-    step === 'email'
-      ? 'Use your email to receive a secure reset code'
-      : `We sent a 6-digit code to ${email}`;
-
   return (
     <AuthWaveLayout
-      heroTitle={heroTitle}
-      heroSubtitle={heroSubtitle}
+      heroTitle={step === 'email' ? 'Reset password' : 'Enter code'}
+      heroSubtitle={
+        step === 'email'
+          ? 'Use your email to receive a secure reset code'
+          : `We sent a 6-digit code to ${email}`
+      }
       onBack={() => {
         if (step === 'otp') {
           setStep('email');
@@ -150,87 +144,104 @@ export default function ForgotPassword() {
     >
       {step === 'email' ? (
         <>
-          <Text style={styles.formHeading}>Recover your account</Text>
-          <Text style={styles.formSubtitle}>
-            Enter the email linked to your account and we will send a one-time verification code.
-          </Text>
+          <AnimatedItem delay={0}>
+            <Text style={styles.formHeading}>Recover your account</Text>
+            <Text style={styles.formSubtitle}>
+              Enter the email linked to your account and we will send a one-time verification code.
+            </Text>
+          </AnimatedItem>
 
-          <Input
-            label="Email Address"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              setError('');
-            }}
-            placeholder="you@example.com"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="emailAddress"
-            error={error}
-            editable={!loading}
-            focusColor={AUTH_CORAL}
-            style={styles.inputInner}
-          />
+          <AnimatedItem delay={70}>
+            <Input
+              label="Email Address"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+              }}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              error={error}
+              editable={!loading}
+              focusColor={AUTH_CORAL}
+              style={styles.inputInner}
+            />
+          </AnimatedItem>
 
-          <Button
-            title={loading ? 'Sending...' : 'Send Verification Code'}
-            onPress={handleSendCode}
-            disabled={loading}
-            loading={loading}
-            variant="primary"
-            fullWidth
-            size="lg"
-            style={styles.primaryBtn}
-          />
+          <AnimatedItem delay={140}>
+            <Button
+              title={loading ? 'Sending...' : 'Send Verification Code'}
+              onPress={handleSendCode}
+              disabled={loading}
+              loading={loading}
+              variant="primary"
+              fullWidth
+              size="lg"
+              style={styles.primaryBtn}
+            />
+          </AnimatedItem>
+
+          <AnimatedItem delay={200}>
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Remember your password?</Text>
+              <Link href="/(auth)" asChild>
+                <Text style={styles.footerLink}>Sign In</Text>
+              </Link>
+            </View>
+          </AnimatedItem>
         </>
       ) : (
         <>
-          <Text style={styles.formHeading}>Enter verification code</Text>
-          <Text style={styles.formSubtitle}>Paste the full code or type one digit at a time.</Text>
-
-          <OtpInputRow
-            otp={otp}
-            error={error}
-            loading={loading}
-            inputRefs={otpRefs}
-            onChange={handleOtpChange}
-            onKeyPress={handleOtpKeyPress}
-            autoFocusFirst
-            activeColor={AUTH_CORAL}
-          />
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-          <Button
-            title={loading ? 'Verifying...' : 'Verify Code'}
-            onPress={handleVerifyCode}
-            disabled={loading || otp.join('').length !== OTP_LENGTH}
-            loading={loading}
-            variant="primary"
-            fullWidth
-            size="lg"
-            style={styles.primaryBtn}
-          />
-
-          <View style={styles.resendRow}>
-            <Text style={styles.resendText}>No code yet?</Text>
-            <Text
-              onPress={!loading ? handleResendCode : undefined}
-              style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
-            >
-              Resend
+          <AnimatedItem delay={0}>
+            <Text style={styles.formHeading}>Enter verification code</Text>
+            <Text style={styles.formSubtitle}>
+              Paste the full code or type one digit at a time.
             </Text>
-          </View>
+          </AnimatedItem>
+
+          <AnimatedItem delay={80}>
+            <OtpInputRow
+              otp={otp}
+              error={error}
+              loading={loading}
+              inputRefs={otpRefs}
+              onChange={handleOtpChange}
+              onKeyPress={handleOtpKeyPress}
+              autoFocusFirst
+              activeColor={AUTH_CORAL}
+            />
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          </AnimatedItem>
+
+          <AnimatedItem delay={150}>
+            <Button
+              title={loading ? 'Verifying...' : 'Verify Code'}
+              onPress={handleVerifyCode}
+              disabled={loading || otp.join('').length !== OTP_LENGTH}
+              loading={loading}
+              variant="primary"
+              fullWidth
+              size="lg"
+              style={styles.primaryBtn}
+            />
+          </AnimatedItem>
+
+          <AnimatedItem delay={210}>
+            <View style={styles.resendRow}>
+              <Text style={styles.resendText}>No code yet?</Text>
+              <Text
+                onPress={!loading ? handleResendCode : undefined}
+                style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+              >
+                Resend
+              </Text>
+            </View>
+          </AnimatedItem>
         </>
       )}
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Remember your password?</Text>
-        <Link href="/(auth)" asChild>
-          <Text style={styles.footerLink}>Sign In</Text>
-        </Link>
-      </View>
     </AuthWaveLayout>
   );
 }

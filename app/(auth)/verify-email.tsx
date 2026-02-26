@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { AUTH_CORAL } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
@@ -21,16 +22,12 @@ export default function VerifyEmail() {
   const otpRefs = useRef<(TextInput | null)[]>([]);
 
   useEffect(() => {
-    if (!email) {
-      loadUserEmail();
-    }
+    if (!email) loadUserEmail();
   }, []);
 
   async function loadUserEmail() {
     const { data } = await supabase.auth.getUser();
-    if (data.user?.email) {
-      setEmail(data.user.email);
-    }
+    if (data.user?.email) setEmail(data.user.email);
   }
 
   async function handleVerifyCode() {
@@ -79,16 +76,10 @@ export default function VerifyEmail() {
     setOtp(Array(OTP_LENGTH).fill(''));
 
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-      });
-
+      const { error } = await supabase.auth.resend({ type: 'signup', email });
       if (error) throw error;
-
       showAlert('Code Sent!', 'We sent a new verification code to your email.');
     } catch (e: any) {
-      console.error('Resend verification error:', e);
       setError(e?.message || 'Failed to resend verification code.');
     } finally {
       setLoading(false);
@@ -105,8 +96,7 @@ export default function VerifyEmail() {
         newOtp[i] = digits[i] || '';
       }
       setOtp(newOtp);
-      const focusIndex = Math.min(digits.length, OTP_LENGTH - 1);
-      otpRefs.current[focusIndex]?.focus();
+      otpRefs.current[Math.min(digits.length, OTP_LENGTH - 1)]?.focus();
       return;
     }
 
@@ -128,64 +118,69 @@ export default function VerifyEmail() {
     }
   }
 
-  function skipVerification() {
-    router.replace('/(app)');
-  }
-
   return (
     <AuthWaveLayout
       heroTitle="Verify email"
       heroSubtitle="One last step to activate your account"
       scrollable
     >
-      <Text style={styles.formHeading}>Confirm your inbox code</Text>
-      <Text style={styles.formSubtitle}>
-        We sent a verification code to{' '}
-        <Text style={styles.emailHighlight}>{email}</Text>
-      </Text>
-
-      <OtpInputRow
-        otp={otp}
-        error={error}
-        loading={loading}
-        inputRefs={otpRefs}
-        onChange={handleOtpChange}
-        onKeyPress={handleOtpKeyPress}
-        autoFocusFirst
-        activeColor={AUTH_CORAL}
-      />
-
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      <Button
-        title={loading ? 'Verifying...' : 'Verify Email'}
-        onPress={handleVerifyCode}
-        disabled={loading || otp.join('').length !== OTP_LENGTH}
-        loading={loading}
-        variant="primary"
-        fullWidth
-        style={styles.primaryBtn}
-      />
-
-      <View style={styles.resendRow}>
-        <Text style={styles.resendText}>Didn't receive the code?</Text>
-        <Text
-          onPress={!loading ? resendVerification : undefined}
-          style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
-        >
-          Resend
+      <AnimatedItem delay={0}>
+        <Text style={styles.formHeading}>Confirm your inbox code</Text>
+        <Text style={styles.formSubtitle}>
+          We sent a verification code to{' '}
+          <Text style={styles.emailHighlight}>{email}</Text>
         </Text>
-      </View>
+      </AnimatedItem>
 
-      <Button
-        title="Continue to App"
-        onPress={skipVerification}
-        variant="outline"
-        fullWidth
-        style={styles.secondaryCta}
-      />
+      <AnimatedItem delay={80}>
+        <OtpInputRow
+          otp={otp}
+          error={error}
+          loading={loading}
+          inputRefs={otpRefs}
+          onChange={handleOtpChange}
+          onKeyPress={handleOtpKeyPress}
+          autoFocusFirst
+          activeColor={AUTH_CORAL}
+        />
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </AnimatedItem>
 
-      <Text style={styles.helperText}>You can verify later from your profile settings if needed.</Text>
+      <AnimatedItem delay={150}>
+        <Button
+          title={loading ? 'Verifying...' : 'Verify Email'}
+          onPress={handleVerifyCode}
+          disabled={loading || otp.join('').length !== OTP_LENGTH}
+          loading={loading}
+          variant="primary"
+          fullWidth
+          style={styles.primaryBtn}
+        />
+      </AnimatedItem>
+
+      <AnimatedItem delay={210}>
+        <View style={styles.resendRow}>
+          <Text style={styles.resendText}>Didn't receive the code?</Text>
+          <Text
+            onPress={!loading ? resendVerification : undefined}
+            style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+          >
+            Resend
+          </Text>
+        </View>
+
+        <Button
+          title="Continue to App"
+          onPress={() => router.replace('/(app)')}
+          variant="outline"
+          fullWidth
+          style={styles.secondaryCta}
+        />
+
+        <Text style={styles.helperText}>
+          You can verify later from your profile settings if needed.
+        </Text>
+      </AnimatedItem>
     </AuthWaveLayout>
   );
 }

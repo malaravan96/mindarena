@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { AUTH_CORAL } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
 import { validateEmail, validatePassword, validateUsername } from '@/lib/validation';
@@ -54,9 +55,7 @@ export default function Register() {
         email: email.trim(),
         password,
         options: {
-          data: {
-            username: username.trim(),
-          },
+          data: { username: username.trim() },
         },
       });
 
@@ -72,8 +71,7 @@ export default function Register() {
       );
       router.push({ pathname: '/(auth)/verify-email', params: { email: email.trim() } });
     } catch (e: any) {
-      const msg = e?.message || 'Something went wrong. Please try again.';
-      showAlert('Registration Failed', msg);
+      showAlert('Registration Failed', e?.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -86,100 +84,111 @@ export default function Register() {
       onBack={() => router.back()}
       scrollable
     >
-      <Text style={styles.formHeading}>Your account details</Text>
+      <AnimatedItem delay={0}>
+        <Text style={styles.formHeading}>Your account details</Text>
+      </AnimatedItem>
 
-      <Input
-        label="Username"
-        value={username}
-        onChangeText={(text) => {
-          setUsername(text);
-          if (errors.username) setErrors({ ...errors, username: undefined });
-        }}
-        placeholder="Choose a username"
-        autoCapitalize="none"
-        autoComplete="username"
-        textContentType="username"
-        error={errors.username}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={60}>
+        <Input
+          label="Username"
+          value={username}
+          onChangeText={(text) => {
+            setUsername(text);
+            if (errors.username) setErrors({ ...errors, username: undefined });
+          }}
+          placeholder="Choose a username"
+          autoCapitalize="none"
+          autoComplete="username"
+          textContentType="username"
+          error={errors.username}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Input
-        label="Email Address"
-        value={email}
-        onChangeText={(text) => {
-          setEmail(text);
-          if (errors.email) setErrors({ ...errors, email: undefined });
-        }}
-        placeholder="you@example.com"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
-        textContentType="emailAddress"
-        error={errors.email}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={110}>
+        <Input
+          label="Email Address"
+          value={email}
+          onChangeText={(text) => {
+            setEmail(text);
+            if (errors.email) setErrors({ ...errors, email: undefined });
+          }}
+          placeholder="you@example.com"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          autoComplete="email"
+          textContentType="emailAddress"
+          error={errors.email}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Input
-        label="Password"
-        value={password}
-        onChangeText={(text) => {
-          setPassword(text);
-          if (errors.password) setErrors({ ...errors, password: undefined });
-        }}
-        placeholder="Min 8 characters"
-        secureTextEntry
-        showPasswordToggle
-        autoCapitalize="none"
-        autoComplete="password-new"
-        textContentType="newPassword"
-        error={errors.password}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={160}>
+        <Input
+          label="Password"
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (errors.password) setErrors({ ...errors, password: undefined });
+          }}
+          placeholder="Min 8 characters"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.password}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+        <PasswordStrengthBar password={password} />
+      </AnimatedItem>
 
-      <PasswordStrengthBar password={password} />
+      <AnimatedItem delay={210}>
+        <Input
+          label="Confirm Password"
+          value={confirmPassword}
+          onChangeText={(text) => {
+            setConfirmPassword(text);
+            if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+          }}
+          placeholder="Re-enter your password"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.confirmPassword}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Input
-        label="Confirm Password"
-        value={confirmPassword}
-        onChangeText={(text) => {
-          setConfirmPassword(text);
-          if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
-        }}
-        placeholder="Re-enter your password"
-        secureTextEntry
-        showPasswordToggle
-        autoCapitalize="none"
-        autoComplete="password-new"
-        textContentType="newPassword"
-        error={errors.confirmPassword}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={260}>
+        <Button
+          title={loading ? 'Creating Account...' : 'Create Account'}
+          onPress={handleRegister}
+          disabled={loading}
+          loading={loading}
+          variant="primary"
+          fullWidth
+          size="lg"
+          style={styles.primaryBtn}
+        />
 
-      <Button
-        title={loading ? 'Creating Account...' : 'Create Account'}
-        onPress={handleRegister}
-        disabled={loading}
-        loading={loading}
-        variant="primary"
-        fullWidth
-        size="lg"
-        style={styles.primaryBtn}
-      />
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Already have an account?</Text>
-        <Link href="/(auth)" asChild>
-          <Text style={styles.footerLink}>Sign In</Text>
-        </Link>
-      </View>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Already have an account?</Text>
+          <Link href="/(auth)" asChild>
+            <Text style={styles.footerLink}>Sign In</Text>
+          </Link>
+        </View>
+      </AnimatedItem>
     </AuthWaveLayout>
   );
 }

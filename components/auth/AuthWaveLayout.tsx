@@ -37,11 +37,18 @@ export function AuthWaveLayout({
   children,
 }: AuthWaveLayoutProps) {
   const insets = useSafeAreaInsets();
+
+  // Panel entrance: slides up from 60px below
   const panelSlideY = useRef(new Animated.Value(60)).current;
   const panelOpacity = useRef(new Animated.Value(0)).current;
 
+  // Content entrance: slightly delayed fade + rise after panel arrives
+  const contentSlideY = useRef(new Animated.Value(28)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     Animated.parallel([
+      // Panel sweeps in
       Animated.timing(panelSlideY, {
         toValue: 0,
         duration: 480,
@@ -56,13 +63,37 @@ export function AuthWaveLayout({
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
+      // Content rises slightly after panel starts moving
+      Animated.timing(contentSlideY, {
+        toValue: 0,
+        duration: 420,
+        delay: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 380,
+        delay: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
 
   const panelContent = (
-    <View style={[styles.panelInner, { paddingBottom: insets.bottom + 24 }]}>
+    <Animated.View
+      style={[
+        styles.panelInner,
+        {
+          paddingBottom: insets.bottom + 24,
+          transform: [{ translateY: contentSlideY }],
+          opacity: contentOpacity,
+        },
+      ]}
+    >
       {children}
-    </View>
+    </Animated.View>
   );
 
   return (
@@ -94,12 +125,9 @@ export function AuthWaveLayout({
         </View>
       </View>
 
-      {/* Wave separator */}
+      {/* Wave separator — absolutely straddles the coral/white boundary */}
       <View
-        style={[
-          styles.waveOverlay,
-          { top: CORAL_HEIGHT - WAVE_HEIGHT + 8 },
-        ]}
+        style={[styles.waveOverlay, { top: CORAL_HEIGHT - WAVE_HEIGHT + 8 }]}
         pointerEvents="none"
       >
         <Svg
@@ -125,8 +153,17 @@ export function AuthWaveLayout({
           },
         ]}
       >
+        {/*
+          iOS: `padding` behavior adds paddingBottom = keyboardHeight.
+          `keyboardVerticalOffset` tells KAV how far below the screen top it sits
+          (= the coral zone height) so it calculates the correct padding.
+
+          Android: system already handles resize via softwareKeyboardLayoutMode="resize",
+          so we pass `undefined` to avoid double-adjusting.
+        */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? CORAL_HEIGHT : 0}
           style={styles.kavFlex}
         >
           {scrollable ? (
@@ -135,6 +172,7 @@ export function AuthWaveLayout({
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
             >
               {panelContent}
             </ScrollView>

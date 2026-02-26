@@ -3,40 +3,40 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { AUTH_CORAL, AUTH_WHITE } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
 
 export default function Onboarding() {
   const router = useRouter();
 
-  function handleGetStarted() {
-    router.replace('/(auth)');
-  }
-
   return (
     <AuthWaveLayout heroTitle="Welcome" heroSubtitle="Challenge your mind daily. Compete globally.">
       <View style={styles.content}>
-        <View style={styles.iconWrap}>
-          <MaterialCommunityIcons name="brain" size={64} color={AUTH_CORAL} />
-        </View>
+        <AnimatedItem delay={0}>
+          <View style={styles.iconWrap}>
+            <MaterialCommunityIcons name="brain" size={64} color={AUTH_CORAL} />
+          </View>
+          <Text style={styles.appName}>MindArena</Text>
+          <Text style={styles.tagline}>
+            Solve unique puzzles every day, climb the leaderboard, and build your solving streak.
+          </Text>
+        </AnimatedItem>
 
-        <Text style={styles.appName}>MindArena</Text>
-        <Text style={styles.tagline}>
-          Solve unique puzzles every day, climb the leaderboard, and build your solving streak.
-        </Text>
-
-        <View style={styles.featuresWrap}>
+        <AnimatedItem delay={80} style={styles.featuresWrap}>
           <FeatureRow emoji="🧩" text="Daily puzzles keep your mind sharp" />
           <FeatureRow emoji="🏆" text="Compete globally and see live rankings" />
           <FeatureRow emoji="🔥" text="Streak bonuses reward consistency" />
-        </View>
+        </AnimatedItem>
 
-        <Pressable
-          onPress={handleGetStarted}
-          style={({ pressed }) => [styles.getStartedBtn, { opacity: pressed ? 0.85 : 1 }]}
-        >
-          <Text style={styles.getStartedText}>Get Started</Text>
-        </Pressable>
+        <AnimatedItem delay={160} style={styles.btnWrap}>
+          <Pressable
+            onPress={() => router.replace('/(auth)')}
+            style={({ pressed }) => [styles.getStartedBtn, { opacity: pressed ? 0.85 : 1 }]}
+          >
+            <Text style={styles.getStartedText}>Get Started</Text>
+          </Pressable>
+        </AnimatedItem>
       </View>
     </AuthWaveLayout>
   );
@@ -64,12 +64,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
+    alignSelf: 'center',
   },
   appName: {
     fontSize: 28,
     fontWeight: fontWeight.black,
     color: '#222222',
     marginBottom: spacing.sm,
+    textAlign: 'center',
   },
   tagline: {
     fontSize: fontSize.base,
@@ -101,6 +103,9 @@ const styles = StyleSheet.create({
     color: '#444444',
     lineHeight: 22,
   },
+  btnWrap: {
+    alignItems: 'center',
+  },
   getStartedBtn: {
     width: 160,
     height: 160,
@@ -113,7 +118,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 16,
     elevation: 8,
-    marginTop: spacing.lg,
   },
   getStartedText: {
     fontSize: fontSize.lg,

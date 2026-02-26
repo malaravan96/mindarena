@@ -6,6 +6,7 @@ import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { AUTH_CORAL, AUTH_INPUT_BORDER } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
@@ -37,9 +38,7 @@ export default function SignIn() {
 
     setLoading(true);
     try {
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email: v,
-      });
+      const { error: authError } = await supabase.auth.signInWithOtp({ email: v });
       if (authError) throw authError;
       setStep('otp');
       showAlert('Code Sent!', 'We sent a 6-digit verification code to your email.');
@@ -154,99 +153,118 @@ export default function SignIn() {
     >
       {step === 'email' ? (
         <>
-          <Text style={styles.formHeading}>Sign in with email</Text>
-          <Text style={styles.formSubtitle}>Get a one-time code instantly and continue where you left off.</Text>
+          <AnimatedItem delay={0}>
+            <Text style={styles.formHeading}>Sign in with email</Text>
+            <Text style={styles.formSubtitle}>
+              Get a one-time code instantly and continue where you left off.
+            </Text>
+          </AnimatedItem>
 
-          <Input
-            label="Email Address"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              setError('');
-            }}
-            placeholder="you@example.com"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="emailAddress"
-            error={error}
-            editable={!loading}
-            focusColor={AUTH_CORAL}
-            style={styles.inputInner}
-          />
+          <AnimatedItem delay={70}>
+            <Input
+              label="Email Address"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+              }}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              textContentType="emailAddress"
+              error={error}
+              editable={!loading}
+              focusColor={AUTH_CORAL}
+              style={styles.inputInner}
+            />
+          </AnimatedItem>
 
-          <Button
-            title={loading ? 'Sending...' : 'Send Verification Code'}
-            onPress={sendOtpCode}
-            disabled={loading}
-            loading={loading}
-            variant="primary"
-            fullWidth
-            size="lg"
-            style={styles.primaryBtn}
-          />
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <Link href="/(auth)/sign-in-password" asChild>
+          <AnimatedItem delay={140}>
             <Button
-              title="Use Password Instead"
-              onPress={() => {}}
-              variant="outline"
+              title={loading ? 'Sending...' : 'Send Verification Code'}
+              onPress={sendOtpCode}
+              disabled={loading}
+              loading={loading}
+              variant="primary"
               fullWidth
               size="lg"
+              style={styles.primaryBtn}
             />
-          </Link>
+          </AnimatedItem>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Need an account?</Text>
-            <Link href="/(auth)/register" asChild>
-              <Text style={styles.footerLink}>Create one</Text>
+          <AnimatedItem delay={200}>
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <Link href="/(auth)/sign-in-password" asChild>
+              <Button
+                title="Use Password Instead"
+                onPress={() => {}}
+                variant="outline"
+                fullWidth
+                size="lg"
+              />
             </Link>
-          </View>
+
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Need an account?</Text>
+              <Link href="/(auth)/register" asChild>
+                <Text style={styles.footerLink}>Create one</Text>
+              </Link>
+            </View>
+          </AnimatedItem>
         </>
       ) : (
         <>
-          <Text style={styles.formHeading}>Enter verification code</Text>
-          <Text style={styles.formSubtitle}>Use the latest 6-digit code from your inbox.</Text>
-
-          <OtpInputRow
-            otp={otp}
-            error={error}
-            loading={loading}
-            inputRefs={otpRefs}
-            onChange={handleOtpChange}
-            onKeyPress={handleOtpKeyPress}
-            autoFocusFirst
-            activeColor={AUTH_CORAL}
-          />
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-          <Button
-            title={loading ? 'Verifying...' : 'Verify & Sign In'}
-            onPress={handleVerifyOtp}
-            disabled={loading || otp.join('').length !== OTP_LENGTH}
-            loading={loading}
-            variant="primary"
-            fullWidth
-            size="lg"
-            style={styles.primaryBtn}
-          />
-
-          <View style={styles.resendRow}>
-            <Text style={styles.resendText}>No code yet?</Text>
-            <Text
-              onPress={!loading ? handleResendCode : undefined}
-              style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
-            >
-              Resend
+          <AnimatedItem delay={0}>
+            <Text style={styles.formHeading}>Enter verification code</Text>
+            <Text style={styles.formSubtitle}>
+              Use the latest 6-digit code from your inbox.
             </Text>
-          </View>
+          </AnimatedItem>
+
+          <AnimatedItem delay={80}>
+            <OtpInputRow
+              otp={otp}
+              error={error}
+              loading={loading}
+              inputRefs={otpRefs}
+              onChange={handleOtpChange}
+              onKeyPress={handleOtpKeyPress}
+              autoFocusFirst
+              activeColor={AUTH_CORAL}
+            />
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          </AnimatedItem>
+
+          <AnimatedItem delay={150}>
+            <Button
+              title={loading ? 'Verifying...' : 'Verify & Sign In'}
+              onPress={handleVerifyOtp}
+              disabled={loading || otp.join('').length !== OTP_LENGTH}
+              loading={loading}
+              variant="primary"
+              fullWidth
+              size="lg"
+              style={styles.primaryBtn}
+            />
+          </AnimatedItem>
+
+          <AnimatedItem delay={210}>
+            <View style={styles.resendRow}>
+              <Text style={styles.resendText}>No code yet?</Text>
+              <Text
+                onPress={!loading ? handleResendCode : undefined}
+                style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+              >
+                Resend
+              </Text>
+            </View>
+          </AnimatedItem>
         </>
       )}
     </AuthWaveLayout>

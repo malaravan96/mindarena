@@ -6,6 +6,7 @@ import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { AUTH_CORAL, AUTH_INPUT_BORDER } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
 import { validateEmail } from '@/lib/validation';
@@ -82,82 +83,94 @@ export default function SignInWithPassword() {
       onBack={() => router.back()}
       scrollable
     >
-      <Text style={styles.formHeading}>Account access</Text>
+      <AnimatedItem delay={0}>
+        <Text style={styles.formHeading}>Account access</Text>
+      </AnimatedItem>
 
-      <Input
-        label="Email Address"
-        value={email}
-        onChangeText={(text) => {
-          setEmail(text);
-          if (errors.email) setErrors({ ...errors, email: undefined });
-        }}
-        placeholder="you@example.com"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
-        textContentType="emailAddress"
-        error={errors.email}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={60}>
+        <Input
+          label="Email Address"
+          value={email}
+          onChangeText={(text) => {
+            setEmail(text);
+            if (errors.email) setErrors({ ...errors, email: undefined });
+          }}
+          placeholder="you@example.com"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          autoComplete="email"
+          textContentType="emailAddress"
+          error={errors.email}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Input
-        label="Password"
-        value={password}
-        onChangeText={(text) => {
-          setPassword(text);
-          if (errors.password) setErrors({ ...errors, password: undefined });
-        }}
-        placeholder="Enter your password"
-        secureTextEntry
-        showPasswordToggle
-        autoCapitalize="none"
-        autoComplete="password"
-        textContentType="password"
-        error={errors.password}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={120}>
+        <Input
+          label="Password"
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (errors.password) setErrors({ ...errors, password: undefined });
+          }}
+          placeholder="Enter your password"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password"
+          textContentType="password"
+          error={errors.password}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Link href="/(auth)/forgot-password" asChild>
-        <Text style={styles.forgotPassword}>Forgot password?</Text>
-      </Link>
+      <AnimatedItem delay={160}>
+        <Link href="/(auth)/forgot-password" asChild>
+          <Text style={styles.forgotPassword}>Forgot password?</Text>
+        </Link>
+      </AnimatedItem>
 
-      <Button
-        title={loading ? 'Signing In...' : 'Login'}
-        onPress={handleSignIn}
-        disabled={loading}
-        loading={loading}
-        variant="primary"
-        fullWidth
-        size="lg"
-        style={styles.primaryBtn}
-      />
-
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>OR</Text>
-        <View style={styles.dividerLine} />
-      </View>
-
-      <Link href="/(auth)" asChild>
+      <AnimatedItem delay={200}>
         <Button
-          title="Sign in with Email Code"
-          onPress={() => {}}
-          variant="outline"
+          title={loading ? 'Signing In...' : 'Login'}
+          onPress={handleSignIn}
+          disabled={loading}
+          loading={loading}
+          variant="primary"
           fullWidth
           size="lg"
+          style={styles.primaryBtn}
         />
-      </Link>
+      </AnimatedItem>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Don't have an account?</Text>
-        <Link href="/(auth)/register" asChild>
-          <Text style={styles.footerLink}>Sign Up</Text>
+      <AnimatedItem delay={240}>
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>OR</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        <Link href="/(auth)" asChild>
+          <Button
+            title="Sign in with Email Code"
+            onPress={() => {}}
+            variant="outline"
+            fullWidth
+            size="lg"
+          />
         </Link>
-      </View>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Don't have an account?</Text>
+          <Link href="/(auth)/register" asChild>
+            <Text style={styles.footerLink}>Sign Up</Text>
+          </Link>
+        </View>
+      </AnimatedItem>
     </AuthWaveLayout>
   );
 }

@@ -7,6 +7,7 @@ import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
 import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { AUTH_CORAL } from '@/constants/authColors';
 import { spacing } from '@/constants/theme';
 import { validatePassword } from '@/lib/validation';
@@ -33,23 +34,18 @@ export default function ResetPassword() {
 
     setErrors(newErrors);
 
-    if (Object.keys(newErrors).length > 0) {
-      return;
-    }
+    if (Object.keys(newErrors).length > 0) return;
 
     setLoading(true);
 
     try {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password,
-      });
+      const { error: updateError } = await supabase.auth.updateUser({ password });
 
       if (updateError) throw updateError;
 
       showAlert('Password Updated!', 'Your password has been successfully updated.');
       router.replace('/(app)');
     } catch (e: any) {
-      console.error('Password update error:', e);
       showAlert('Update Failed', e?.message || 'Could not update password. Please try again.');
     } finally {
       setLoading(false);
@@ -63,58 +59,65 @@ export default function ResetPassword() {
       onBack={() => router.back()}
       scrollable
     >
-      <Text style={styles.formHeading}>Set your new password</Text>
+      <AnimatedItem delay={0}>
+        <Text style={styles.formHeading}>Set your new password</Text>
+      </AnimatedItem>
 
-      <Input
-        label="New Password"
-        value={password}
-        onChangeText={(text) => {
-          setPassword(text);
-          if (errors.password) setErrors({ ...errors, password: undefined });
-        }}
-        placeholder="Min 8 characters"
-        secureTextEntry
-        showPasswordToggle
-        autoCapitalize="none"
-        autoComplete="password-new"
-        textContentType="newPassword"
-        error={errors.password}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
+      <AnimatedItem delay={70}>
+        <Input
+          label="New Password"
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (errors.password) setErrors({ ...errors, password: undefined });
+          }}
+          placeholder="Min 8 characters"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.password}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+        <PasswordStrengthBar password={password} />
+      </AnimatedItem>
 
-      <PasswordStrengthBar password={password} />
+      <AnimatedItem delay={140}>
+        <Input
+          label="Confirm New Password"
+          value={confirmPassword}
+          onChangeText={(text) => {
+            setConfirmPassword(text);
+            if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+          }}
+          placeholder="Re-enter your new password"
+          secureTextEntry
+          showPasswordToggle
+          autoCapitalize="none"
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.confirmPassword}
+          editable={!loading}
+          focusColor={AUTH_CORAL}
+          style={styles.inputInner}
+        />
+      </AnimatedItem>
 
-      <Input
-        label="Confirm New Password"
-        value={confirmPassword}
-        onChangeText={(text) => {
-          setConfirmPassword(text);
-          if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
-        }}
-        placeholder="Re-enter your new password"
-        secureTextEntry
-        showPasswordToggle
-        autoCapitalize="none"
-        autoComplete="password-new"
-        textContentType="newPassword"
-        error={errors.confirmPassword}
-        editable={!loading}
-        focusColor={AUTH_CORAL}
-        style={styles.inputInner}
-      />
-
-      <Button
-        title={loading ? 'Updating...' : 'Update Password'}
-        onPress={handleUpdatePassword}
-        disabled={loading}
-        loading={loading}
-        variant="primary"
-        fullWidth
-        size="lg"
-        style={styles.primaryBtn}
-      />
+      <AnimatedItem delay={210}>
+        <Button
+          title={loading ? 'Updating...' : 'Update Password'}
+          onPress={handleUpdatePassword}
+          disabled={loading}
+          loading={loading}
+          variant="primary"
+          fullWidth
+          size="lg"
+          style={styles.primaryBtn}
+        />
+      </AnimatedItem>
     </AuthWaveLayout>
   );
 }
