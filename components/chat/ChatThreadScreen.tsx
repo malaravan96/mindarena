@@ -24,7 +24,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useCall } from '@/contexts/CallContext';
 import { useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
-import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage } from '@/lib/dm';
+import { getCurrentUserId, listMessages, markConversationRead, markMessagesDelivered, sendMessage, editDmMessage, deleteDmMessage, pinDmMessage, unpinDmMessage, listPinnedDmMessages } from '@/lib/dm';
 import { loadReactionsForMessages, toggleReaction, groupReactions, broadcastReaction } from '@/lib/dmReactions';
 import { blockUser, unblockUser, isBlocked as checkIsBlocked } from '@/lib/connections';
 import {
@@ -53,6 +53,11 @@ import { MessageBubble } from '@/components/chat/MessageBubble';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { ReactionPicker } from '@/components/chat/ReactionPicker';
 import { ScreenshotWarningBanner } from '@/components/chat/ScreenshotWarningBanner';
+import { MessageActionMenu } from '@/components/chat/MessageActionMenu';
+import { PinnedMessagesSheet } from '@/components/chat/PinnedMessagesSheet';
+import { ForwardMessageSheet } from '@/components/chat/ForwardMessageSheet';
+import { PollCreatorSheet } from '@/components/chat/PollCreatorSheet';
+import { MessageSearchSheet } from '@/components/chat/MessageSearchSheet';
 
 type CallMode = 'audio' | 'video';
 type IncomingInvite = { fromId: string; fromName: string; mode: CallMode };
@@ -113,6 +118,13 @@ export function ChatThreadScreen() {
   const [reactionsMap, setReactionsMap] = useState<Map<string, DmReactionGroup[]>>(new Map());
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<DmMessage | null>(null);
+  const [actionMenuMessage, setActionMenuMessage] = useState<DmMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<DmMessage | null>(null);
+  const [showPinnedSheet, setShowPinnedSheet] = useState(false);
+  const [pinnedMessages, setPinnedMessages] = useState<DmMessage[]>([]);
+  const [forwardingMessage, setForwardingMessage] = useState<DmMessage | null>(null);
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const [incomingInvite, setIncomingInvite] = useState<IncomingInvite | null>(null);
   const [pendingCallId, setPendingCallId] = useState<string | null>(null);
@@ -436,6 +448,11 @@ export function ChatThreadScreen() {
       ]);
       setMessages(rows);
 
+      // Load pinned messages
+      listPinnedDmMessages(conversationId)
+        .then(setPinnedMessages)
+        .catch(() => null);
+
       // Load reactions for all messages
       if (rows.length > 0 && uid) {
         loadReactionsForMessages(rows.map((r) => r.id))
@@ -555,13 +572,27 @@ export function ChatThreadScreen() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         ({ new: row }) => {
-          // Update message status in-place
+          // Update message status, edit, delete, pin state in-place
           const updated = row as DmMessage;
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === updated.id ? { ...msg, status: updated.status } : msg,
+              msg.id === updated.id
+                ? {
+                    ...msg,
+                    status: updated.status,
+                    body: updated.is_deleted ? '' : (updated.edited_at ? updated.body : msg.body),
+                    edited_at: updated.edited_at,
+                    is_deleted: updated.is_deleted,
+                    pinned_at: updated.pinned_at,
+                    pinned_by: updated.pinned_by,
+                  }
+                : msg,
             ),
           );
+          // Refresh pinned list if pin changed
+          if (updated.pinned_at !== undefined) {
+            listPinnedDmMessages(conversationId).then(setPinnedMessages).catch(() => null);
+          }
         },
       )
       .on(
@@ -929,12 +960,32 @@ export function ChatThreadScreen() {
     if (!body) return;
     shouldAutoScrollRef.current = true;
 
-    const replyToId = replyTarget?.id ?? null;
-
     // Stop typing signal
     if (callChannelRef.current && userId && conversationId) {
       sendTypingStop(callChannelRef.current, userId, conversationId).catch(() => null);
     }
+
+    // Handle edit mode
+    if (editingMessage) {
+      setSending(true);
+      try {
+        await editDmMessage(editingMessage.id, body);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === editingMessage.id ? { ...m, body, edited_at: new Date().toISOString() } : m,
+          ),
+        );
+        setInput('');
+        setEditingMessage(null);
+      } catch (e: any) {
+        showAlert('Edit failed', e?.message ?? 'Could not edit message');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    const replyToId = replyTarget?.id ?? null;
 
     setSending(true);
     try {
@@ -968,8 +1019,41 @@ export function ChatThreadScreen() {
     }
   }
 
-  const handleLongPress = useCallback((messageId: string) => {
-    setReactionPickerMessageId(messageId);
+  const handleLongPress = useCallback((message: DmMessage) => {
+    setActionMenuMessage(message);
+  }, []);
+
+  const loadPinnedMessages = useCallback(async () => {
+    if (!conversationId) return;
+    const pinned = await listPinnedDmMessages(conversationId).catch(() => []);
+    setPinnedMessages(pinned);
+  }, [conversationId]);
+
+  const handlePin = useCallback(async (message: DmMessage) => {
+    try {
+      if (message.pinned_at) {
+        await unpinDmMessage(message.id);
+        setMessages((prev) => prev.map((m) => m.id === message.id ? { ...m, pinned_at: null, pinned_by: null } : m));
+      } else {
+        await pinDmMessage(message.id);
+        const now = new Date().toISOString();
+        setMessages((prev) => prev.map((m) => m.id === message.id ? { ...m, pinned_at: now, pinned_by: userId } : m));
+      }
+      await loadPinnedMessages();
+    } catch (e: any) {
+      showAlert('Failed', e?.message ?? 'Could not pin message');
+    }
+  }, [userId, loadPinnedMessages]);
+
+  const handleDelete = useCallback(async (message: DmMessage) => {
+    const confirmed = await showConfirm('Delete message?', 'This cannot be undone.', 'Delete');
+    if (!confirmed) return;
+    try {
+      await deleteDmMessage(message.id);
+      setMessages((prev) => prev.map((m) => m.id === message.id ? { ...m, is_deleted: true, body: '' } : m));
+    } catch (e: any) {
+      showAlert('Failed', e?.message ?? 'Could not delete message');
+    }
   }, []);
 
   const handleReactionSelect = useCallback(async (messageId: string, emoji: string) => {
@@ -1142,13 +1226,14 @@ export function ChatThreadScreen() {
           replyTo={replyTo}
           peerName={peerName}
           currentUserId={userId ?? undefined}
+          isPinned={!!item.pinned_at}
           onImagePress={(url) => {
             router.push({ pathname: '/image-viewer', params: { url } });
           }}
           onVoicePress={(url, id) => {
             setPlayingVoiceId((prev) => (prev === id ? null : id));
           }}
-          onLongPress={() => handleLongPress(item.id)}
+          onLongPress={() => handleLongPress(item)}
           onReactionPress={(emoji) => { void handleReactionSelect(item.id, emoji); }}
           onSwipeReply={() => handleSwipeReply(item)}
           onReplyQuotePress={() => {
@@ -1217,6 +1302,20 @@ export function ChatThreadScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => setShowSearch(true)}
+            style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
+          >
+            <Ionicons name="search-outline" size={16} color={colors.primary} />
+          </Pressable>
+          {pinnedMessages.length > 0 && (
+            <Pressable
+              onPress={() => setShowPinnedSheet(true)}
+              style={[styles.headerActionBtn, { backgroundColor: `${colors.primary}10` }]}
+            >
+              <Ionicons name="pin" size={16} color={colors.primary} />
+            </Pressable>
+          )}
           <Pressable
             onPress={() => void startCall('audio')}
             disabled={callStartDisabled || isBlockedState}
@@ -1375,6 +1474,22 @@ export function ChatThreadScreen() {
             }
           />
 
+          {editingMessage && (
+            <View style={[styles.replyBar, { backgroundColor: `${colors.warning}10`, borderTopColor: colors.border, borderLeftColor: colors.warning }]}>
+              <View style={styles.replyBarContent}>
+                <Text style={[styles.replyBarName, { color: colors.warning }]} numberOfLines={1}>
+                  Edit message
+                </Text>
+                <Text style={[styles.replyBarBody, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {editingMessage.body}
+                </Text>
+              </View>
+              <Pressable onPress={() => { setEditingMessage(null); setInput(''); }} style={styles.replyBarClose}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
           {replyTarget && (
             <View style={[styles.replyBar, { backgroundColor: colors.surfaceVariant, borderTopColor: colors.border, borderLeftColor: colors.primary }]}>
               <View style={styles.replyBarContent}>
@@ -1460,6 +1575,12 @@ export function ChatThreadScreen() {
                 >
                   <Ionicons name="mic-outline" size={20} color={colors.wrong} />
                 </Pressable>
+                <Pressable
+                  onPress={() => setShowPollCreator(true)}
+                  style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10` }]}
+                >
+                  <Ionicons name="bar-chart-outline" size={20} color={colors.primary} />
+                </Pressable>
               </>
             )}
 
@@ -1495,6 +1616,64 @@ export function ChatThreadScreen() {
           }
         }}
         onClose={() => setReactionPickerMessageId(null)}
+      />
+
+      <MessageActionMenu
+        visible={!!actionMenuMessage}
+        message={actionMenuMessage}
+        isOwn={actionMenuMessage?.sender_id === userId}
+        isPinned={!!actionMenuMessage?.pinned_at}
+        onClose={() => setActionMenuMessage(null)}
+        onReact={() => {
+          if (actionMenuMessage) setReactionPickerMessageId(actionMenuMessage.id);
+        }}
+        onReply={() => {
+          if (actionMenuMessage) setReplyTarget(actionMenuMessage);
+        }}
+        onEdit={actionMenuMessage && !actionMenuMessage.is_deleted && (actionMenuMessage.message_type === 'text' || !actionMenuMessage.message_type) ? () => {
+          setEditingMessage(actionMenuMessage);
+          setInput(actionMenuMessage.body);
+        } : undefined}
+        onDelete={actionMenuMessage ? () => { void handleDelete(actionMenuMessage); } : undefined}
+        onPin={actionMenuMessage && !actionMenuMessage.is_deleted ? () => { void handlePin(actionMenuMessage); } : undefined}
+        onForward={actionMenuMessage && !actionMenuMessage.is_deleted ? () => setForwardingMessage(actionMenuMessage) : undefined}
+      />
+
+      <PinnedMessagesSheet
+        visible={showPinnedSheet}
+        pinnedMessages={pinnedMessages}
+        onClose={() => setShowPinnedSheet(false)}
+        onJumpTo={(messageId) => {
+          const idx = sortedMessages.findIndex((m) => m.id === messageId);
+          if (idx >= 0) {
+            messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+          }
+        }}
+      />
+
+      <ForwardMessageSheet
+        visible={!!forwardingMessage}
+        message={forwardingMessage}
+        onClose={() => setForwardingMessage(null)}
+      />
+
+      <PollCreatorSheet
+        visible={showPollCreator}
+        conversationId={conversationId}
+        onClose={() => setShowPollCreator(false)}
+        onPollCreated={() => { /* messages arrive via realtime */ }}
+      />
+
+      <MessageSearchSheet
+        visible={showSearch}
+        messages={sortedMessages}
+        onClose={() => setShowSearch(false)}
+        onJumpTo={(messageId) => {
+          const idx = sortedMessages.findIndex((m) => m.id === messageId);
+          if (idx >= 0) {
+            messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+          }
+        }}
       />
 
       {/* Disappearing Messages Modal */}

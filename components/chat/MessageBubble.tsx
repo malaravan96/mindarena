@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import type { DmMessage, DmMessageStatus, DmReactionGroup } from '@/lib/types';
+import { PollBubble } from '@/components/chat/PollBubble';
 
 interface MessageBubbleProps {
   item: DmMessage;
@@ -19,6 +20,11 @@ interface MessageBubbleProps {
   onSwipeReply?: () => void;
   peerName?: string;
   currentUserId?: string;
+  isPinned?: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onPin?: () => void;
+  onForward?: () => void;
 }
 
 function StatusIcon({ status }: { status?: DmMessageStatus }) {
@@ -142,9 +148,12 @@ export function MessageBubble({
   onSwipeReply,
   peerName,
   currentUserId,
+  isPinned,
 }: MessageBubbleProps) {
   const { colors } = useTheme();
   const msgType = item.message_type ?? 'text';
+  const isDeleted = item.is_deleted === true;
+  const isEdited = !isDeleted && !!item.edited_at;
   const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const bubbleBg = isOwn ? `${colors.primary}16` : colors.surfaceVariant;
@@ -166,6 +175,23 @@ export function MessageBubble({
     : '';
 
   const renderContent = () => {
+    if (isDeleted) {
+      return (
+        <Text style={[styles.deletedText, { color: colors.textSecondary }]}>
+          This message was deleted
+        </Text>
+      );
+    }
+
+    if (msgType === 'poll') {
+      let pollId: string | null = null;
+      try { pollId = JSON.parse(item.body)?.poll_id ?? null; } catch { /* ignore */ }
+      if (pollId) {
+        return <PollBubble pollId={pollId} currentUserId={currentUserId ?? null} />;
+      }
+      return <Text style={[styles.msgBody, { color: colors.textSecondary, fontStyle: 'italic' }]}>Poll unavailable</Text>;
+    }
+
     if (msgType === 'image' && item.attachment_url) {
       return (
         <Pressable onPress={() => onImagePress?.(item.attachment_url!)}>
@@ -248,25 +274,35 @@ export function MessageBubble({
 
     // Default: text
     return (
-      <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
+      <View>
+        <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
+        {isEdited && (
+          <Text style={[styles.editedLabel, { color: colors.textTertiary }]}>(edited)</Text>
+        )}
+      </View>
     );
   };
 
-  const hasReactions = reactions && reactions.length > 0;
+  const hasReactions = !isDeleted && reactions && reactions.length > 0;
 
   return (
     <View {...panResponder.panHandlers} style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }]}>
-      <Pressable onLongPress={onLongPress} delayLongPress={350}>
+      <Pressable onLongPress={!isDeleted ? onLongPress : undefined} delayLongPress={350}>
         <View
           style={[
             styles.bubble,
             {
-              backgroundColor: bubbleBg,
-              borderColor: bubbleBorder,
+              backgroundColor: isDeleted ? `${colors.textTertiary}10` : bubbleBg,
+              borderColor: isDeleted ? colors.border : bubbleBorder,
             },
           ]}
         >
-          {replyTo && (
+          {isPinned && !isDeleted && (
+            <View style={styles.pinBadge}>
+              <Ionicons name="pin" size={10} color={colors.primary} />
+            </View>
+          )}
+          {replyTo && !isDeleted && (
             <ReplyQuoteBox
               replyTo={replyTo}
               senderName={replyQuoteSenderName}
@@ -281,7 +317,7 @@ export function MessageBubble({
       </Pressable>
       <View style={styles.metaRow}>
         <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
-        {isOwn && <StatusIcon status={item.status} />}
+        {isOwn && !isDeleted && <StatusIcon status={item.status} />}
       </View>
       {hasReactions && (
         <ReactionPillsRow
@@ -347,6 +383,14 @@ const styles = StyleSheet.create({
   },
   fileName: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   fileSize: { fontSize: fontSize.xs, marginTop: 2 },
+  deletedText: { fontSize: fontSize.sm, fontStyle: 'italic' },
+  editedLabel: { fontSize: 10, fontStyle: 'italic', marginTop: 2, textAlign: 'right' },
+  pinBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    zIndex: 1,
+  },
   // Reply quote box
   replyQuoteBox: {
     borderLeftWidth: 3,

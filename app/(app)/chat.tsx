@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,11 +32,32 @@ export default function ChatScreen() {
   const [groups, setGroups] = useState<GroupConversation[]>([]);
   const [targets, setTargets] = useState<MessageTarget[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ConnectionWithProfile[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const titleCount = useMemo(
     () => conversations.reduce((sum, item) => sum + item.unread_count, 0),
     [conversations],
   );
+
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return conversations;
+    return conversations.filter(
+      (c) =>
+        c.peer_name.toLowerCase().includes(q) ||
+        (c.last_message ?? '').toLowerCase().includes(q),
+    );
+  }, [conversations, searchQuery]);
+
+  const filteredGroups = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return groups;
+    return groups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(q) ||
+        (g.last_message ?? '').toLowerCase().includes(q),
+    );
+  }, [groups, searchQuery]);
 
   const loadData = useCallback(async (uid: string) => {
     setLoading(true);
@@ -133,6 +154,23 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      <View style={[styles.searchWrap, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}>
+        <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+        <TextInput
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search chats..."
+          placeholderTextColor={colors.textTertiary}
+          style={[styles.searchInput, { color: colors.text }]}
+          returnKeyType="search"
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+          </Pressable>
+        )}
+      </View>
+
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -193,10 +231,12 @@ export default function ChatScreen() {
 
           <Card style={styles.blockCard} padding="md">
             <Text style={[styles.sectionLabel, { color: colors.text }]}>Recent Conversations</Text>
-            {conversations.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No conversations yet.</Text>
+            {filteredConversations.length === 0 ? (
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {searchQuery ? 'No matching conversations.' : 'No conversations yet.'}
+              </Text>
             ) : (
-              conversations.map((item) => (
+              filteredConversations.map((item) => (
                 <Pressable
                   key={item.id}
                   onPress={() =>
@@ -243,10 +283,10 @@ export default function ChatScreen() {
             )}
           </Card>
 
-          {groups.length > 0 && (
+          {filteredGroups.length > 0 && (
             <Card style={styles.blockCard} padding="md">
               <Text style={[styles.sectionLabel, { color: colors.text }]}>Group Chats</Text>
-              {groups.map((group) => (
+              {filteredGroups.map((group) => (
                 <Pressable
                   key={group.id}
                   onPress={() => router.push({ pathname: '/group-chat', params: { groupId: group.id } })}
@@ -340,6 +380,18 @@ const styles = StyleSheet.create({
   },
   unreadPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderRadius: borderRadius.full,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  searchInput: { flex: 1, fontSize: fontSize.sm, paddingVertical: 2 },
   scrollContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl, gap: spacing.md },
   blockCard: { borderRadius: borderRadius.xl },
   sectionLabel: { fontSize: fontSize.base, fontWeight: fontWeight.bold, marginBottom: spacing.sm },

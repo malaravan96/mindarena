@@ -67,7 +67,7 @@ export interface DmConversation {
   unread_count: number;
 }
 
-export type DmMessageType = 'text' | 'image' | 'voice' | 'video' | 'file';
+export type DmMessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'poll';
 export type DmMessageStatus = 'sent' | 'delivered' | 'seen';
 
 export interface DmMessage {
@@ -86,6 +86,10 @@ export interface DmMessage {
   attachment_height?: number | null;
   expires_at?: string | null;
   reply_to_id?: string | null;
+  edited_at?: string | null;
+  is_deleted?: boolean;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
 }
 
 export interface DmReaction {
@@ -129,7 +133,7 @@ export interface GroupMember {
   profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>;
 }
 
-export type GroupMessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'system';
+export type GroupMessageType = 'text' | 'image' | 'voice' | 'video' | 'file' | 'system' | 'poll';
 
 export interface GroupMessage {
   id: string;
@@ -145,7 +149,30 @@ export interface GroupMessage {
   attachment_height?: number | null;
   expires_at?: string | null;
   created_at: string;
+  reply_to_id?: string | null;
+  edited_at?: string | null;
+  is_deleted?: boolean;
+  pinned_at?: string | null;
+  pinned_by?: string | null;
   sender_profile?: Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>;
+}
+
+export interface ChatPoll {
+  id: string;
+  question: string;
+  is_multiple_choice: boolean;
+  ends_at?: string | null;
+  created_by: string;
+  options: ChatPollOption[];
+}
+
+export interface ChatPollOption {
+  id: string;
+  poll_id: string;
+  text: string;
+  display_order: number;
+  vote_count: number;
+  voted_by_me: boolean;
 }
 
 export interface DmConversationSettings {

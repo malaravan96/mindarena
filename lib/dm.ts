@@ -226,7 +226,7 @@ export async function listMessages(
 
   const { data, error } = await supabase
     .from('dm_messages')
-    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id')
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true })
     .limit(400);
@@ -323,7 +323,7 @@ export async function sendMessage(conversationId: string, body: string, replyToI
   const { data, error } = await supabase
     .from('dm_messages')
     .insert({ conversation_id: conversationId, sender_id: uid, body: messageBody, status: 'sent', message_type: 'text', reply_to_id: replyToId ?? null })
-    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id')
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
     .maybeSingle<DmMessage>();
 
   if (error || !data) throw error ?? new Error('Message insert failed');
@@ -376,6 +376,68 @@ export async function markMessagesDelivered(conversationId: string) {
 export async function getTotalDmUnread(userId: string) {
   const conversations = await listConversations(userId);
   return conversations.reduce((sum, c) => sum + c.unread_count, 0);
+}
+
+export async function editDmMessage(messageId: string, newBody: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('dm_messages')
+    .update({ body: newBody, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', uid);
+
+  if (error) throw error;
+}
+
+export async function deleteDmMessage(messageId: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('dm_messages')
+    .update({ is_deleted: true, body: '', edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', uid);
+
+  if (error) throw error;
+}
+
+export async function pinDmMessage(messageId: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('dm_messages')
+    .update({ pinned_at: new Date().toISOString(), pinned_by: uid })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+export async function unpinDmMessage(messageId: string): Promise<void> {
+  const { error } = await supabase
+    .from('dm_messages')
+    .update({ pinned_at: null, pinned_by: null })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+export async function listPinnedDmMessages(conversationId: string): Promise<DmMessage[]> {
+  const uid = await getCurrentUserId();
+  if (!uid) return [];
+
+  const { data, error } = await supabase
+    .from('dm_messages')
+    .select('id, conversation_id, sender_id, body, created_at, status, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
+    .eq('conversation_id', conversationId)
+    .not('pinned_at', 'is', null)
+    .order('pinned_at', { ascending: false });
+
+  if (error || !data) return [];
+  return data as DmMessage[];
 }
 
 export async function listMessageTargets(userId: string): Promise<Pick<Profile, 'id' | 'username' | 'display_name' | 'avatar_url'>[]> {

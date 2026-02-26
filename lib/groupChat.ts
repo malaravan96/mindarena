@@ -96,7 +96,7 @@ export async function listGroupConversations(userId: string): Promise<GroupConve
 export async function listGroupMessages(groupId: string): Promise<GroupMessage[]> {
   const { data, error } = await supabase
     .from('group_messages')
-    .select('id, group_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, created_at')
+    .select('id, group_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, created_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
     .eq('group_id', groupId)
     .order('created_at', { ascending: true })
     .limit(400);
@@ -127,30 +127,33 @@ export async function sendGroupMessage(
   groupId: string,
   body: string,
   attachment?: {
-    message_type: 'image' | 'voice' | 'video' | 'file';
-    attachment_url: string;
+    message_type?: 'image' | 'voice' | 'video' | 'file';
+    attachment_url?: string;
     attachment_mime?: string;
     attachment_size?: number;
     attachment_duration?: number;
     attachment_width?: number;
     attachment_height?: number;
+    replyToId?: string | null;
   },
 ): Promise<GroupMessage> {
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
 
+  const { replyToId, ...attachmentData } = attachment ?? {};
   const payload: Record<string, unknown> = {
     group_id: groupId,
     sender_id: uid,
     body,
-    message_type: attachment?.message_type ?? 'text',
-    ...(attachment ?? {}),
+    message_type: attachmentData?.message_type ?? 'text',
+    reply_to_id: replyToId ?? null,
+    ...attachmentData,
   };
 
   const { data, error } = await supabase
     .from('group_messages')
     .insert(payload)
-    .select('id, group_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, created_at')
+    .select('id, group_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, created_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
     .maybeSingle<GroupMessage>();
 
   if (error || !data) throw error ?? new Error('Group message insert failed');
@@ -298,6 +301,65 @@ export async function deleteGroup(groupId: string): Promise<void> {
 
   const { error } = await supabase.from('group_conversations').delete().eq('id', groupId);
   if (error) throw error;
+}
+
+export async function editGroupMessage(messageId: string, newBody: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('group_messages')
+    .update({ body: newBody, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', uid);
+
+  if (error) throw error;
+}
+
+export async function deleteGroupMessage(messageId: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('group_messages')
+    .update({ is_deleted: true, body: '', edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', uid);
+
+  if (error) throw error;
+}
+
+export async function pinGroupMessage(messageId: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) throw new Error('Not signed in');
+
+  const { error } = await supabase
+    .from('group_messages')
+    .update({ pinned_at: new Date().toISOString(), pinned_by: uid })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+export async function unpinGroupMessage(messageId: string): Promise<void> {
+  const { error } = await supabase
+    .from('group_messages')
+    .update({ pinned_at: null, pinned_by: null })
+    .eq('id', messageId);
+
+  if (error) throw error;
+}
+
+export async function listPinnedGroupMessages(groupId: string): Promise<GroupMessage[]> {
+  const { data, error } = await supabase
+    .from('group_messages')
+    .select('id, group_id, sender_id, body, message_type, attachment_url, attachment_mime, attachment_size, attachment_duration, attachment_width, attachment_height, expires_at, created_at, reply_to_id, edited_at, is_deleted, pinned_at, pinned_by')
+    .eq('group_id', groupId)
+    .not('pinned_at', 'is', null)
+    .order('pinned_at', { ascending: false });
+
+  if (error || !data) return [];
+  return data as GroupMessage[];
 }
 
 export async function getGroupInfo(groupId: string): Promise<GroupConversation | null> {

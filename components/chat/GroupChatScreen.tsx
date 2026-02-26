@@ -24,12 +24,23 @@ import {
   listGroupMessages,
   markGroupRead,
   sendGroupMessage,
+  editGroupMessage,
+  deleteGroupMessage,
+  pinGroupMessage,
+  unpinGroupMessage,
+  listPinnedGroupMessages,
 } from '@/lib/groupChat';
 import { supabase } from '@/lib/supabase';
-import { showAlert } from '@/lib/alert';
-import type { GroupConversation, GroupMessage } from '@/lib/types';
+import { showAlert, showConfirm } from '@/lib/alert';
+import type { GroupConversation, GroupMessage, DmMessage } from '@/lib/types';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
 import { GroupMembersSheet } from '@/components/chat/GroupMembersSheet';
+import { MessageActionMenu } from '@/components/chat/MessageActionMenu';
+import { PinnedMessagesSheet } from '@/components/chat/PinnedMessagesSheet';
+import { ForwardMessageSheet } from '@/components/chat/ForwardMessageSheet';
+import { PollCreatorSheet } from '@/components/chat/PollCreatorSheet';
+import { MessageSearchSheet } from '@/components/chat/MessageSearchSheet';
+import { MessageBubble } from '@/components/chat/MessageBubble';
 
 const TYPING_RESET_MS = 4000;
 
@@ -53,6 +64,14 @@ export function GroupChatScreen() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const [actionMenuMessage, setActionMenuMessage] = useState<GroupMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<GroupMessage | null>(null);
+  const [replyTarget, setReplyTarget] = useState<GroupMessage | null>(null);
+  const [showPinnedSheet, setShowPinnedSheet] = useState(false);
+  const [pinnedMessages, setPinnedMessages] = useState<GroupMessage[]>([]);
+  const [forwardingMessage, setForwardingMessage] = useState<GroupMessage | null>(null);
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const messageListRef = useRef<FlatList<GroupMessage> | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -97,6 +116,11 @@ export function GroupChatScreen() {
 
       setGroup(info);
       setMessages(rows);
+
+      // Load pinned messages
+      if (groupId) {
+        listPinnedGroupMessages(groupId).then(setPinnedMessages).catch(() => null);
+      }
     } finally {
       setLoading(false);
     }
@@ -155,6 +179,35 @@ export function GroupChatScreen() {
 
           if (msg.sender_id !== userIdRef.current) {
             markGroupRead(groupId).catch(() => null);
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'group_messages',
+          filter: `group_id=eq.${groupId}`,
+        },
+        ({ new: row }) => {
+          const updated = row as GroupMessage;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === updated.id
+                ? {
+                    ...m,
+                    body: updated.is_deleted ? '' : (updated.edited_at ? updated.body : m.body),
+                    edited_at: updated.edited_at,
+                    is_deleted: updated.is_deleted,
+                    pinned_at: updated.pinned_at,
+                    pinned_by: updated.pinned_by,
+                  }
+                : m,
+            ),
+          );
+          if (updated.pinned_at !== undefined) {
+            listPinnedGroupMessages(groupId).then(setPinnedMessages).catch(() => null);
           }
         },
       )
@@ -222,9 +275,30 @@ export function GroupChatScreen() {
       payload: { fromId: userId },
     }).catch(() => null);
 
+    // Handle edit mode
+    if (editingMessage) {
+      setSending(true);
+      try {
+        await editGroupMessage(editingMessage.id, body);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === editingMessage.id ? { ...m, body, edited_at: new Date().toISOString() } : m,
+          ),
+        );
+        setInput('');
+        setEditingMessage(null);
+      } catch (e: any) {
+        showAlert('Edit failed', e?.message ?? 'Could not edit message');
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
     setSending(true);
     try {
-      const msg = await sendGroupMessage(groupId, body);
+      const replyToId = replyTarget?.id ?? null;
+      const msg = await sendGroupMessage(groupId, body, replyToId ? { replyToId } : undefined);
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         const next = [...prev, msg];
@@ -232,6 +306,7 @@ export function GroupChatScreen() {
         return next;
       });
       setInput('');
+      setReplyTarget(null);
     } catch (e: any) {
       showAlert('Send failed', e?.message ?? 'Could not send message');
     } finally {
@@ -262,12 +337,23 @@ export function GroupChatScreen() {
       const isOwn = item.sender_id === userId;
       const senderName = item.sender_profile?.display_name || item.sender_profile?.username || 'Player';
       const avatarUrl = item.sender_profile?.avatar_url;
-      const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      if (item.message_type === 'system') {
+        return (
+          <View style={styles.systemRow}>
+            <Text style={[styles.systemText, { color: colors.textSecondary }]}>{item.body}</Text>
+          </View>
+        );
+      }
+
+      const replyTo = item.reply_to_id
+        ? (messages.find((m) => m.id === item.reply_to_id) as DmMessage | undefined) ?? null
+        : null;
 
       return (
-        <View style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }]}>
+        <View>
           {!isOwn && (
-            <View style={styles.senderRow}>
+            <View style={[styles.senderRow, { justifyContent: 'flex-start' }]}>
               {avatarUrl ? (
                 <Image source={{ uri: avatarUrl }} style={styles.senderAvatar} />
               ) : (
@@ -280,26 +366,25 @@ export function GroupChatScreen() {
               <Text style={[styles.senderName, { color: colors.textSecondary }]}>{senderName}</Text>
             </View>
           )}
-          <View
-            style={[
-              styles.bubble,
-              {
-                backgroundColor: isOwn ? `${colors.primary}16` : colors.surfaceVariant,
-                borderColor: isOwn ? `${colors.primary}35` : colors.border,
-              },
-            ]}
-          >
-            {item.message_type === 'system' ? (
-              <Text style={[styles.systemText, { color: colors.textSecondary }]}>{item.body}</Text>
-            ) : (
-              <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
-            )}
-          </View>
-          <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
+          <MessageBubble
+            item={item as unknown as DmMessage}
+            isOwn={isOwn}
+            currentUserId={userId ?? undefined}
+            isPinned={!!item.pinned_at}
+            replyTo={replyTo}
+            onLongPress={() => setActionMenuMessage(item)}
+            onSwipeReply={() => setReplyTarget(item)}
+            onReplyQuotePress={() => {
+              const idx = sortedMessages.findIndex((m) => m.id === item.reply_to_id);
+              if (idx >= 0) {
+                messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+              }
+            }}
+          />
         </View>
       );
     },
-    [userId, colors],
+    [userId, colors, messages, sortedMessages],
   );
 
   const typingLabel = useMemo(() => {
@@ -343,12 +428,28 @@ export function GroupChatScreen() {
             Group chat
           </Text>
         </View>
-        <Pressable
-          onPress={() => setShowMembers(true)}
-          style={[styles.membersBtn, { backgroundColor: `${colors.secondary}14` }]}
-        >
-          <Ionicons name="people-outline" size={18} color={colors.secondary} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: spacing.xs }}>
+          <Pressable
+            onPress={() => setShowSearch(true)}
+            style={[styles.membersBtn, { backgroundColor: `${colors.primary}10` }]}
+          >
+            <Ionicons name="search-outline" size={18} color={colors.primary} />
+          </Pressable>
+          {pinnedMessages.length > 0 && (
+            <Pressable
+              onPress={() => setShowPinnedSheet(true)}
+              style={[styles.membersBtn, { backgroundColor: `${colors.primary}10` }]}
+            >
+              <Ionicons name="pin" size={18} color={colors.primary} />
+            </Pressable>
+          )}
+          <Pressable
+            onPress={() => setShowMembers(true)}
+            style={[styles.membersBtn, { backgroundColor: `${colors.secondary}14` }]}
+          >
+            <Ionicons name="people-outline" size={18} color={colors.secondary} />
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -382,6 +483,34 @@ export function GroupChatScreen() {
               ) : null
             }
           />
+
+          {editingMessage && (
+            <View style={[styles.replyBar, { backgroundColor: `${colors.warning}10`, borderTopColor: colors.border, borderLeftColor: colors.warning }]}>
+              <View style={styles.replyBarContent}>
+                <Text style={[styles.replyBarName, { color: colors.warning }]} numberOfLines={1}>Edit message</Text>
+                <Text style={[styles.replyBarBody, { color: colors.textSecondary }]} numberOfLines={1}>{editingMessage.body}</Text>
+              </View>
+              <Pressable onPress={() => { setEditingMessage(null); setInput(''); }} style={styles.replyBarClose}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
+          {replyTarget && (
+            <View style={[styles.replyBar, { backgroundColor: colors.surfaceVariant, borderTopColor: colors.border, borderLeftColor: colors.secondary }]}>
+              <View style={styles.replyBarContent}>
+                <Text style={[styles.replyBarName, { color: colors.secondary }]} numberOfLines={1}>
+                  {replyTarget.sender_profile?.display_name || replyTarget.sender_profile?.username || 'Someone'}
+                </Text>
+                <Text style={[styles.replyBarBody, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {replyTarget.body || `[${replyTarget.message_type}]`}
+                </Text>
+              </View>
+              <Pressable onPress={() => setReplyTarget(null)} style={styles.replyBarClose}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
 
           <View
             style={[
@@ -418,6 +547,14 @@ export function GroupChatScreen() {
               returnKeyType="send"
               multiline
             />
+            {!input.trim() && (
+              <Pressable
+                onPress={() => setShowPollCreator(true)}
+                style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10` }]}
+              >
+                <Ionicons name="bar-chart-outline" size={20} color={colors.primary} />
+              </Pressable>
+            )}
             <Pressable
               onPress={onSend}
               disabled={sending || !input.trim()}
@@ -445,6 +582,85 @@ export function GroupChatScreen() {
         currentUserId={userId}
         onClose={() => setShowMembers(false)}
         onGroupDeleted={() => router.replace('/chat')}
+      />
+
+      <MessageActionMenu
+        visible={!!actionMenuMessage}
+        message={actionMenuMessage as unknown as import('@/lib/types').DmMessage | null}
+        isOwn={actionMenuMessage?.sender_id === userId}
+        isPinned={!!actionMenuMessage?.pinned_at}
+        onClose={() => setActionMenuMessage(null)}
+        onReact={() => { /* groups don't have reactions yet — no-op */ }}
+        onReply={() => { if (actionMenuMessage) setReplyTarget(actionMenuMessage); }}
+        onEdit={
+          actionMenuMessage && !actionMenuMessage.is_deleted && actionMenuMessage.message_type === 'text'
+            ? () => { setEditingMessage(actionMenuMessage); setInput(actionMenuMessage.body); }
+            : undefined
+        }
+        onDelete={actionMenuMessage ? () => {
+          const msg = actionMenuMessage;
+          showConfirm('Delete message?', 'This cannot be undone.', 'Delete').then((confirmed) => {
+            if (!confirmed) return;
+            deleteGroupMessage(msg.id)
+              .then(() => setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, is_deleted: true, body: '' } : m)))
+              .catch((e: any) => showAlert('Failed', e?.message ?? 'Could not delete'));
+          });
+        } : undefined}
+        onPin={
+          actionMenuMessage && !actionMenuMessage.is_deleted
+            ? () => {
+                const msg = actionMenuMessage;
+                const fn = msg.pinned_at ? unpinGroupMessage : pinGroupMessage;
+                fn(msg.id)
+                  .then(() => {
+                    const now = new Date().toISOString();
+                    setMessages((prev) =>
+                      prev.map((m) => m.id === msg.id ? { ...m, pinned_at: msg.pinned_at ? null : now } : m),
+                    );
+                    return groupId ? listPinnedGroupMessages(groupId).then(setPinnedMessages) : Promise.resolve();
+                  })
+                  .catch((e: any) => showAlert('Failed', e?.message ?? 'Could not pin'));
+              }
+            : undefined
+        }
+        onForward={actionMenuMessage && !actionMenuMessage.is_deleted ? () => setForwardingMessage(actionMenuMessage) : undefined}
+      />
+
+      <PinnedMessagesSheet
+        visible={showPinnedSheet}
+        pinnedMessages={pinnedMessages as unknown as import('@/lib/types').DmMessage[]}
+        onClose={() => setShowPinnedSheet(false)}
+        onJumpTo={(messageId) => {
+          const idx = sortedMessages.findIndex((m) => m.id === messageId);
+          if (idx >= 0) {
+            messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+          }
+        }}
+      />
+
+      <ForwardMessageSheet
+        visible={!!forwardingMessage}
+        message={forwardingMessage as unknown as import('@/lib/types').DmMessage | null}
+        onClose={() => setForwardingMessage(null)}
+      />
+
+      <PollCreatorSheet
+        visible={showPollCreator}
+        groupId={groupId}
+        onClose={() => setShowPollCreator(false)}
+        onPollCreated={() => { /* messages arrive via realtime */ }}
+      />
+
+      <MessageSearchSheet
+        visible={showSearch}
+        messages={sortedMessages as unknown as import('@/lib/types').DmMessage[]}
+        onClose={() => setShowSearch(false)}
+        onJumpTo={(messageId) => {
+          const idx = sortedMessages.findIndex((m) => m.id === messageId);
+          if (idx >= 0) {
+            messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+          }
+        }}
       />
     </SafeAreaView>
   );
@@ -546,4 +762,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  systemRow: { alignItems: 'center', paddingVertical: 4 },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderLeftWidth: 3,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  replyBarContent: { flex: 1, gap: 2 },
+  replyBarName: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
+  replyBarBody: { fontSize: fontSize.xs },
+  replyBarClose: { padding: 4 },
 });
