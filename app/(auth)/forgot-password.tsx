@@ -1,26 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
-import { AuthHeader } from '@/components/AuthHeader';
-import { AuthScaffold } from '@/components/auth/AuthScaffold';
+import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
-import { useTheme } from '@/contexts/ThemeContext';
-import {
-  borderRadius,
-  fontSize,
-  fontWeight,
-  isDesktop,
-  isTablet,
-  spacing,
-} from '@/constants/theme';
+import { AUTH_CORAL } from '@/constants/authColors';
+import { fontSize, fontWeight, spacing } from '@/constants/theme';
 import { validateEmail } from '@/lib/validation';
-import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 const OTP_LENGTH = 6;
 
@@ -32,8 +21,6 @@ export default function ForgotPassword() {
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpRefs = useRef<(TextInput | null)[]>([]);
-  const { colors } = useTheme();
-  const anim = useEntryAnimation();
 
   async function handleSendCode() {
     const emailError = validateEmail(email);
@@ -140,185 +127,139 @@ export default function ForgotPassword() {
     }
   }
 
-  const maxWidth = isDesktop ? 520 : isTablet ? 580 : '100%';
+  const heroTitle = step === 'email' ? 'Reset password' : 'Enter code';
+  const heroSubtitle =
+    step === 'email'
+      ? 'Use your email to receive a secure reset code'
+      : `We sent a 6-digit code to ${email}`;
 
   return (
-    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
-      <AuthHeader
-        icon={
-          step === 'email' ? (
-            <Ionicons name="key-outline" size={34} color="#ffffff" />
-          ) : (
-            <Ionicons name="mail-open-outline" size={34} color="#ffffff" />
-          )
+    <AuthWaveLayout
+      heroTitle={heroTitle}
+      heroSubtitle={heroSubtitle}
+      onBack={() => {
+        if (step === 'otp') {
+          setStep('email');
+          setOtp(Array(OTP_LENGTH).fill(''));
+          setError('');
+        } else {
+          router.back();
         }
-        title={step === 'email' ? 'Reset Password' : 'Enter Verification Code'}
-        subtitle={
-          step === 'email'
-            ? 'Use your email to receive a secure reset code'
-            : `We sent a 6-digit code to ${email}`
-        }
-        onBack={() => {
-          if (step === 'otp') {
-            setStep('email');
-            setOtp(Array(OTP_LENGTH).fill(''));
-            setError('');
-          } else {
-            router.back();
-          }
-        }}
-      />
-
-      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
-        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
-          <Ionicons name="shield-outline" size={14} color={colors.primary} />
-          <Text style={[styles.badgeText, { color: colors.primary }]}>
-            {step === 'email' ? 'Identity Check' : 'Code Verification'}
+      }}
+      scrollable
+    >
+      {step === 'email' ? (
+        <>
+          <Text style={styles.formHeading}>Recover your account</Text>
+          <Text style={styles.formSubtitle}>
+            Enter the email linked to your account and we will send a one-time verification code.
           </Text>
-        </View>
 
-        {step === 'email' ? (
-          <>
-            <Text style={[styles.title, { color: colors.text }]}>Recover your account</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Enter the email linked to your account and we will send a one-time verification code.</Text>
+          <Input
+            label="Email Address"
+            value={email}
+            onChangeText={(text) => {
+              setEmail(text);
+              setError('');
+            }}
+            placeholder="you@example.com"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+            error={error}
+            editable={!loading}
+            focusColor={AUTH_CORAL}
+            style={styles.inputInner}
+          />
 
-            <Input
-              label="Email Address"
-              icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
-              value={email}
-              onChangeText={(text) => {
-                setEmail(text);
-                setError('');
-              }}
-              placeholder="you@example.com"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-              textContentType="emailAddress"
-              error={error}
-              editable={!loading}
-            />
+          <Button
+            title={loading ? 'Sending...' : 'Send Verification Code'}
+            onPress={handleSendCode}
+            disabled={loading}
+            loading={loading}
+            variant="primary"
+            fullWidth
+            size="lg"
+            style={styles.primaryBtn}
+          />
+        </>
+      ) : (
+        <>
+          <Text style={styles.formHeading}>Enter verification code</Text>
+          <Text style={styles.formSubtitle}>Paste the full code or type one digit at a time.</Text>
 
-            <Button
-              title={loading ? 'Sending...' : 'Send Verification Code'}
-              onPress={handleSendCode}
-              disabled={loading}
-              loading={loading}
-              variant="gradient"
-              fullWidth
-              size="lg"
-              style={styles.primaryCta}
-            />
+          <OtpInputRow
+            otp={otp}
+            error={error}
+            loading={loading}
+            inputRefs={otpRefs}
+            onChange={handleOtpChange}
+            onKeyPress={handleOtpKeyPress}
+            autoFocusFirst
+            activeColor={AUTH_CORAL}
+          />
 
-            <View style={[styles.infoChip, { backgroundColor: colors.surfaceVariant }]}> 
-              <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-              <Text style={[styles.infoText, { color: colors.textSecondary }]}>Codes expire quickly for your security. Request a new one anytime.</Text>
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={[styles.title, { color: colors.text }]}>Enter verification code</Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Paste the full code or type one digit at a time.</Text>
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            <OtpInputRow
-              otp={otp}
-              error={error}
-              loading={loading}
-              inputRefs={otpRefs}
-              onChange={handleOtpChange}
-              onKeyPress={handleOtpKeyPress}
-              autoFocusFirst
-            />
+          <Button
+            title={loading ? 'Verifying...' : 'Verify Code'}
+            onPress={handleVerifyCode}
+            disabled={loading || otp.join('').length !== OTP_LENGTH}
+            loading={loading}
+            variant="primary"
+            fullWidth
+            size="lg"
+            style={styles.primaryBtn}
+          />
 
-            {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
-
-            <Button
-              title={loading ? 'Verifying...' : 'Verify Code'}
-              onPress={handleVerifyCode}
-              disabled={loading || otp.join('').length !== OTP_LENGTH}
-              loading={loading}
-              variant="gradient"
-              fullWidth
-              size="lg"
-              style={styles.primaryCta}
-            />
-
-            <View style={styles.resendRow}>
-              <Text style={[styles.resendText, { color: colors.textSecondary }]}>No code yet?</Text>
-              <Text
-                onPress={!loading ? handleResendCode : undefined}
-                style={[
-                  styles.resendLink,
-                  { color: loading ? colors.textSecondary : colors.primary },
-                ]}
-              >
-                Resend
-              </Text>
-            </View>
-          </>
-        )}
-      </Card>
+          <View style={styles.resendRow}>
+            <Text style={styles.resendText}>No code yet?</Text>
+            <Text
+              onPress={!loading ? handleResendCode : undefined}
+              style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+            >
+              Resend
+            </Text>
+          </View>
+        </>
+      )}
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: colors.textSecondary }]}>Remember your password?</Text>
+        <Text style={styles.footerText}>Remember your password?</Text>
         <Link href="/(auth)" asChild>
-          <Text style={[styles.footerLink, { color: colors.primary }]}>Sign In</Text>
+          <Text style={styles.footerLink}>Sign In</Text>
         </Link>
       </View>
-    </AuthScaffold>
+    </AuthWaveLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: '100%',
-    borderRadius: borderRadius.xl,
-    marginBottom: spacing.md,
+  formHeading: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 8,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginBottom: spacing.sm,
-  },
-  badgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    textTransform: 'uppercase',
-  },
-  title: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  subtitle: {
+  formSubtitle: {
     fontSize: fontSize.sm,
-    marginTop: 4,
-    marginBottom: spacing.md,
-    lineHeight: fontSize.sm * 1.35,
+    color: '#888888',
+    marginBottom: 20,
+    lineHeight: 20,
   },
-  primaryCta: {
-    borderRadius: borderRadius.full,
+  inputInner: {
+    backgroundColor: '#FAFAFA',
   },
-  infoChip: {
-    marginTop: spacing.sm,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  infoText: {
-    fontSize: fontSize.xs,
-    flex: 1,
+  primaryBtn: {
+    backgroundColor: AUTH_CORAL,
+    borderRadius: 999,
+    borderColor: AUTH_CORAL,
   },
   errorText: {
     textAlign: 'center',
     fontSize: fontSize.sm,
+    color: '#ef4444',
     marginBottom: spacing.sm,
   },
   resendRow: {
@@ -330,6 +271,7 @@ const styles = StyleSheet.create({
   },
   resendText: {
     fontSize: fontSize.sm,
+    color: '#888888',
   },
   resendLink: {
     fontSize: fontSize.sm,
@@ -340,13 +282,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    marginTop: spacing.sm,
+    marginTop: spacing.lg,
+    paddingBottom: spacing.md,
   },
   footerText: {
     fontSize: fontSize.sm,
+    color: '#888888',
   },
   footerLink: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: AUTH_CORAL,
   },
 });

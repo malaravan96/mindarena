@@ -11,6 +11,7 @@ interface OtpInputRowProps {
   onChange: (text: string, index: number) => void;
   onKeyPress: (key: string, index: number) => void;
   autoFocusFirst?: boolean;
+  activeColor?: string;
 }
 
 export function OtpInputRow({
@@ -21,9 +22,11 @@ export function OtpInputRow({
   onChange,
   onKeyPress,
   autoFocusFirst = false,
+  activeColor,
 }: OtpInputRowProps) {
   const { colors } = useTheme();
   const otpLength = otp.length;
+  const filledColor = activeColor ?? colors.primary;
 
   return (
     <View style={styles.otpContainer}>
@@ -36,7 +39,7 @@ export function OtpInputRow({
           style={[
             styles.otpBox,
             {
-              borderColor: digit ? colors.primary : error ? colors.error : colors.border,
+              borderColor: digit ? filledColor : error ? colors.error : colors.border,
               backgroundColor: colors.surface,
               color: colors.text,
             },

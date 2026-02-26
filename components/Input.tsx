@@ -10,6 +10,7 @@ interface InputProps extends TextInputProps {
   helperText?: string;
   icon?: React.ReactNode;
   showPasswordToggle?: boolean;
+  focusColor?: string;
 }
 
 export function Input({
@@ -18,6 +19,7 @@ export function Input({
   helperText,
   icon,
   showPasswordToggle,
+  focusColor,
   style,
   secureTextEntry,
   ...props
@@ -26,6 +28,7 @@ export function Input({
   const [isFocused, setIsFocused] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
+  const resolvedFocusColor = focusColor ?? colors.primary;
   const isSecure = showPasswordToggle ? !passwordVisible : secureTextEntry;
 
   return (
@@ -50,7 +53,7 @@ export function Input({
           styles.inputRow,
           {
             backgroundColor: colors.surface,
-            borderColor: error ? colors.error : isFocused ? colors.primary : colors.border,
+            borderColor: error ? colors.error : isFocused ? resolvedFocusColor : colors.border,
             borderRadius: borderRadius.md,
           },
         ]}

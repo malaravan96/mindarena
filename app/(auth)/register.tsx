@@ -1,26 +1,15 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
-import { AuthHeader } from '@/components/AuthHeader';
 import { PasswordStrengthBar } from '@/components/PasswordStrengthBar';
-import { AuthScaffold } from '@/components/auth/AuthScaffold';
-import { useTheme } from '@/contexts/ThemeContext';
-import {
-  borderRadius,
-  fontSize,
-  fontWeight,
-  isDesktop,
-  isTablet,
-  spacing,
-} from '@/constants/theme';
+import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AUTH_CORAL } from '@/constants/authColors';
+import { fontSize, fontWeight, spacing } from '@/constants/theme';
 import { validateEmail, validatePassword, validateUsername } from '@/lib/validation';
-import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function Register() {
   const router = useRouter();
@@ -35,8 +24,6 @@ export default function Register() {
     confirmPassword?: string;
     username?: string;
   }>({});
-  const { colors } = useTheme();
-  const anim = useEntryAnimation();
 
   function validateForm() {
     const newErrors: typeof errors = {};
@@ -92,184 +79,142 @@ export default function Register() {
     }
   }
 
-  const maxWidth = isDesktop ? 500 : isTablet ? 560 : '100%';
-
   return (
-    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
-      <AuthHeader
-        icon={<Ionicons name="person-add-outline" size={34} color="#ffffff" />}
-        title="Create Account"
-        subtitle="Set up your MindArena profile and start your first challenge"
-        onBack={() => router.back()}
+    <AuthWaveLayout
+      heroTitle="Create account"
+      heroSubtitle="Set up your MindArena profile"
+      onBack={() => router.back()}
+      scrollable
+    >
+      <Text style={styles.formHeading}>Your account details</Text>
+
+      <Input
+        label="Username"
+        value={username}
+        onChangeText={(text) => {
+          setUsername(text);
+          if (errors.username) setErrors({ ...errors, username: undefined });
+        }}
+        placeholder="Choose a username"
+        autoCapitalize="none"
+        autoComplete="username"
+        textContentType="username"
+        error={errors.username}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
       />
 
-      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
-        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
-          <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
-          <Text style={[styles.badgeText, { color: colors.primary }]}>New Player Setup</Text>
-        </View>
+      <Input
+        label="Email Address"
+        value={email}
+        onChangeText={(text) => {
+          setEmail(text);
+          if (errors.email) setErrors({ ...errors, email: undefined });
+        }}
+        placeholder="you@example.com"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        autoComplete="email"
+        textContentType="emailAddress"
+        error={errors.email}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
+      />
 
-        <Text style={[styles.title, { color: colors.text }]}>Your account details</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Choose a unique username and a strong password to secure your progress.</Text>
+      <Input
+        label="Password"
+        value={password}
+        onChangeText={(text) => {
+          setPassword(text);
+          if (errors.password) setErrors({ ...errors, password: undefined });
+        }}
+        placeholder="Min 8 characters"
+        secureTextEntry
+        showPasswordToggle
+        autoCapitalize="none"
+        autoComplete="password-new"
+        textContentType="newPassword"
+        error={errors.password}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
+      />
 
-        <Input
-          label="Username"
-          icon={<Ionicons name="at" size={18} color={colors.textTertiary} />}
-          value={username}
-          onChangeText={(text) => {
-            setUsername(text);
-            if (errors.username) setErrors({ ...errors, username: undefined });
-          }}
-          placeholder="Choose a username"
-          autoCapitalize="none"
-          autoComplete="username"
-          textContentType="username"
-          error={errors.username}
-          editable={!loading}
-        />
+      <PasswordStrengthBar password={password} />
 
-        <Input
-          label="Email Address"
-          icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
-          value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            if (errors.email) setErrors({ ...errors, email: undefined });
-          }}
-          placeholder="you@example.com"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-          textContentType="emailAddress"
-          error={errors.email}
-          editable={!loading}
-        />
+      <Input
+        label="Confirm Password"
+        value={confirmPassword}
+        onChangeText={(text) => {
+          setConfirmPassword(text);
+          if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+        }}
+        placeholder="Re-enter your password"
+        secureTextEntry
+        showPasswordToggle
+        autoCapitalize="none"
+        autoComplete="password-new"
+        textContentType="newPassword"
+        error={errors.confirmPassword}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
+      />
 
-        <Input
-          label="Password"
-          icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            if (errors.password) setErrors({ ...errors, password: undefined });
-          }}
-          placeholder="Min 8 characters"
-          secureTextEntry
-          showPasswordToggle
-          autoCapitalize="none"
-          autoComplete="password-new"
-          textContentType="newPassword"
-          error={errors.password}
-          editable={!loading}
-        />
-
-        <PasswordStrengthBar password={password} />
-
-        <Input
-          label="Confirm Password"
-          icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
-          value={confirmPassword}
-          onChangeText={(text) => {
-            setConfirmPassword(text);
-            if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
-          }}
-          placeholder="Re-enter your password"
-          secureTextEntry
-          showPasswordToggle
-          autoCapitalize="none"
-          autoComplete="password-new"
-          textContentType="newPassword"
-          error={errors.confirmPassword}
-          editable={!loading}
-        />
-
-        <Button
-          title={loading ? 'Creating Account...' : 'Create Account'}
-          onPress={handleRegister}
-          disabled={loading}
-          loading={loading}
-          variant="gradient"
-          fullWidth
-          size="lg"
-          style={styles.primaryCta}
-        />
-
-        <View style={[styles.trustChip, { backgroundColor: colors.surfaceVariant }]}> 
-          <Ionicons name="shield-checkmark-outline" size={14} color={colors.textSecondary} />
-          <Text style={[styles.trustChipText, { color: colors.textSecondary }]}>Encrypted account data and secure authentication</Text>
-        </View>
-      </Card>
+      <Button
+        title={loading ? 'Creating Account...' : 'Create Account'}
+        onPress={handleRegister}
+        disabled={loading}
+        loading={loading}
+        variant="primary"
+        fullWidth
+        size="lg"
+        style={styles.primaryBtn}
+      />
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: colors.textSecondary }]}>Already have an account?</Text>
+        <Text style={styles.footerText}>Already have an account?</Text>
         <Link href="/(auth)" asChild>
-          <Text style={[styles.footerLink, { color: colors.primary }]}>Sign In</Text>
+          <Text style={styles.footerLink}>Sign In</Text>
         </Link>
       </View>
-    </AuthScaffold>
+    </AuthWaveLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: '100%',
-    borderRadius: borderRadius.xl,
-    marginBottom: spacing.md,
+  formHeading: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 20,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginBottom: spacing.sm,
+  inputInner: {
+    backgroundColor: '#FAFAFA',
   },
-  badgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    textTransform: 'uppercase',
-  },
-  title: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  subtitle: {
-    fontSize: fontSize.sm,
-    marginTop: 4,
-    marginBottom: spacing.md,
-    lineHeight: fontSize.sm * 1.35,
-  },
-  primaryCta: {
+  primaryBtn: {
+    backgroundColor: AUTH_CORAL,
+    borderRadius: 999,
+    borderColor: AUTH_CORAL,
     marginTop: spacing.sm,
-    borderRadius: borderRadius.full,
-  },
-  trustChip: {
-    marginTop: spacing.md,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  trustChipText: {
-    fontSize: fontSize.xs,
-    flex: 1,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    marginTop: spacing.sm,
+    marginTop: spacing.lg,
+    paddingBottom: spacing.md,
   },
   footerText: {
     fontSize: fontSize.sm,
+    color: '#888888',
   },
   footerLink: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: AUTH_CORAL,
   },
 });

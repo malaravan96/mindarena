@@ -1,24 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
-import { Card } from '@/components/Card';
-import { AuthHeader } from '@/components/AuthHeader';
-import { AuthScaffold } from '@/components/auth/AuthScaffold';
+import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
-import { useTheme } from '@/contexts/ThemeContext';
-import {
-  borderRadius,
-  fontSize,
-  fontWeight,
-  isDesktop,
-  isTablet,
-  spacing,
-} from '@/constants/theme';
-import { useEntryAnimation } from '@/lib/useEntryAnimation';
+import { AUTH_CORAL } from '@/constants/authColors';
+import { fontSize, fontWeight, spacing } from '@/constants/theme';
 
 const OTP_LENGTH = 6;
 
@@ -30,8 +19,6 @@ export default function VerifyEmail() {
   const [error, setError] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpRefs = useRef<(TextInput | null)[]>([]);
-  const { colors } = useTheme();
-  const anim = useEntryAnimation();
 
   useEffect(() => {
     if (!email) {
@@ -145,131 +132,91 @@ export default function VerifyEmail() {
     router.replace('/(app)');
   }
 
-  const maxWidth = isDesktop ? 520 : isTablet ? 580 : '100%';
-
   return (
-    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
-      <AuthHeader
-        icon={<Ionicons name="mail-open-outline" size={34} color="#ffffff" />}
-        title="Verify Your Email"
-        subtitle="One last step to secure and activate your account"
+    <AuthWaveLayout
+      heroTitle="Verify email"
+      heroSubtitle="One last step to activate your account"
+      scrollable
+    >
+      <Text style={styles.formHeading}>Confirm your inbox code</Text>
+      <Text style={styles.formSubtitle}>
+        We sent a verification code to{' '}
+        <Text style={styles.emailHighlight}>{email}</Text>
+      </Text>
+
+      <OtpInputRow
+        otp={otp}
+        error={error}
+        loading={loading}
+        inputRefs={otpRefs}
+        onChange={handleOtpChange}
+        onKeyPress={handleOtpKeyPress}
+        autoFocusFirst
+        activeColor={AUTH_CORAL}
       />
 
-      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
-        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
-          <Ionicons name="checkmark-circle-outline" size={14} color={colors.primary} />
-          <Text style={[styles.badgeText, { color: colors.primary }]}>Account Confirmation</Text>
-        </View>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <Text style={[styles.title, { color: colors.text }]}>Confirm your inbox code</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>We sent a verification code to your email address.</Text>
+      <Button
+        title={loading ? 'Verifying...' : 'Verify Email'}
+        onPress={handleVerifyCode}
+        disabled={loading || otp.join('').length !== OTP_LENGTH}
+        loading={loading}
+        variant="primary"
+        fullWidth
+        style={styles.primaryBtn}
+      />
 
-        <View style={[styles.emailPill, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}> 
-          <Ionicons name="mail-outline" size={14} color={colors.textSecondary} />
-          <Text style={[styles.emailText, { color: colors.primary }]} numberOfLines={1}>{email}</Text>
-        </View>
+      <View style={styles.resendRow}>
+        <Text style={styles.resendText}>Didn't receive the code?</Text>
+        <Text
+          onPress={!loading ? resendVerification : undefined}
+          style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+        >
+          Resend
+        </Text>
+      </View>
 
-        <OtpInputRow
-          otp={otp}
-          error={error}
-          loading={loading}
-          inputRefs={otpRefs}
-          onChange={handleOtpChange}
-          onKeyPress={handleOtpKeyPress}
-          autoFocusFirst
-        />
+      <Button
+        title="Continue to App"
+        onPress={skipVerification}
+        variant="outline"
+        fullWidth
+        style={styles.secondaryCta}
+      />
 
-        {error ? <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text> : null}
-
-        <Button
-          title={loading ? 'Verifying...' : 'Verify Email'}
-          onPress={handleVerifyCode}
-          disabled={loading || otp.join('').length !== OTP_LENGTH}
-          loading={loading}
-          variant="gradient"
-          fullWidth
-          style={styles.primaryCta}
-        />
-
-        <View style={styles.resendRow}>
-          <Text style={[styles.resendText, { color: colors.textSecondary }]}>Didn't receive the code?</Text>
-          <Text
-            onPress={!loading ? resendVerification : undefined}
-            style={[
-              styles.resendLink,
-              { color: loading ? colors.textSecondary : colors.primary },
-            ]}
-          >
-            Resend
-          </Text>
-        </View>
-
-        <Button
-          title="Continue to App"
-          onPress={skipVerification}
-          variant="outline"
-          fullWidth
-          style={styles.secondaryCta}
-        />
-
-        <Text style={[styles.helperText, { color: colors.textTertiary }]}>You can verify later from your profile settings if needed.</Text>
-      </Card>
-    </AuthScaffold>
+      <Text style={styles.helperText}>You can verify later from your profile settings if needed.</Text>
+    </AuthWaveLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: '100%',
-    borderRadius: borderRadius.xl,
+  formHeading: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 8,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginBottom: spacing.sm,
-  },
-  badgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    textTransform: 'uppercase',
-  },
-  title: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  subtitle: {
+  formSubtitle: {
     fontSize: fontSize.sm,
-    marginTop: 4,
-    marginBottom: spacing.md,
-    lineHeight: fontSize.sm * 1.35,
+    color: '#888888',
+    marginBottom: 20,
+    lineHeight: 20,
   },
-  emailPill: {
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  emailText: {
-    fontSize: fontSize.sm,
+  emailHighlight: {
     fontWeight: fontWeight.bold,
-    flex: 1,
+    color: AUTH_CORAL,
   },
   errorText: {
     textAlign: 'center',
     marginBottom: spacing.sm,
     fontSize: fontSize.sm,
+    color: '#ef4444',
   },
-  primaryCta: {
-    borderRadius: borderRadius.full,
+  primaryBtn: {
+    backgroundColor: AUTH_CORAL,
+    borderRadius: 999,
+    borderColor: AUTH_CORAL,
   },
   resendRow: {
     flexDirection: 'row',
@@ -280,6 +227,7 @@ const styles = StyleSheet.create({
   },
   resendText: {
     fontSize: fontSize.sm,
+    color: '#888888',
   },
   resendLink: {
     fontSize: fontSize.sm,
@@ -287,11 +235,13 @@ const styles = StyleSheet.create({
   },
   secondaryCta: {
     marginTop: spacing.md,
-    borderRadius: borderRadius.full,
+    borderRadius: 999,
   },
   helperText: {
     textAlign: 'center',
     fontSize: fontSize.xs,
+    color: '#888888',
     marginTop: spacing.md,
+    paddingBottom: spacing.md,
   },
 });

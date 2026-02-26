@@ -11,7 +11,9 @@
       "mcp__ide__getDiagnostics",
       "Bash(del \"C:\\\\Users\\\\Malar\\\\Desktop\\\\mindarena-mvp\\\\mindarena\\\\components\\\\PrimaryButton.tsx\")",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

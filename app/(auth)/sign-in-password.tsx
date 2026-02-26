@@ -1,25 +1,14 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
-import { AuthHeader } from '@/components/AuthHeader';
-import { AuthScaffold } from '@/components/auth/AuthScaffold';
-import { useTheme } from '@/contexts/ThemeContext';
-import {
-  borderRadius,
-  fontSize,
-  fontWeight,
-  isDesktop,
-  isTablet,
-  spacing,
-} from '@/constants/theme';
+import { AuthWaveLayout } from '@/components/auth/AuthWaveLayout';
+import { AUTH_CORAL, AUTH_INPUT_BORDER } from '@/constants/authColors';
+import { fontSize, fontWeight, spacing } from '@/constants/theme';
 import { validateEmail } from '@/lib/validation';
-import { useEntryAnimation } from '@/lib/useEntryAnimation';
 
 export default function SignInWithPassword() {
   const router = useRouter();
@@ -30,8 +19,6 @@ export default function SignInWithPassword() {
     email?: string;
     password?: string;
   }>({});
-  const { colors } = useTheme();
-  const anim = useEntryAnimation();
 
   async function handleSignIn() {
     const newErrors: typeof errors = {};
@@ -88,147 +75,115 @@ export default function SignInWithPassword() {
     }
   }
 
-  const maxWidth = isDesktop ? 520 : isTablet ? 580 : '100%';
-
   return (
-    <AuthScaffold animatedStyle={anim} maxWidth={maxWidth} scrollable>
-      <AuthHeader
-        icon={<Ionicons name="log-in-outline" size={34} color="#ffffff" />}
-        title="Welcome Back"
-        subtitle="Sign in with your password and pick up your challenge streak"
-        onBack={() => router.back()}
+    <AuthWaveLayout
+      heroTitle="Sign in"
+      heroSubtitle="Pick up your challenge streak"
+      onBack={() => router.back()}
+      scrollable
+    >
+      <Text style={styles.formHeading}>Account access</Text>
+
+      <Input
+        label="Email Address"
+        value={email}
+        onChangeText={(text) => {
+          setEmail(text);
+          if (errors.email) setErrors({ ...errors, email: undefined });
+        }}
+        placeholder="you@example.com"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        autoComplete="email"
+        textContentType="emailAddress"
+        error={errors.email}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
       />
 
-      <Card style={[styles.card, { borderColor: `${colors.primary}22` }]}>
-        <View style={[styles.badge, { backgroundColor: `${colors.primary}16` }]}>
-          <Ionicons name="key-outline" size={14} color={colors.primary} />
-          <Text style={[styles.badgeText, { color: colors.primary }]}>Password Sign In</Text>
-        </View>
+      <Input
+        label="Password"
+        value={password}
+        onChangeText={(text) => {
+          setPassword(text);
+          if (errors.password) setErrors({ ...errors, password: undefined });
+        }}
+        placeholder="Enter your password"
+        secureTextEntry
+        showPasswordToggle
+        autoCapitalize="none"
+        autoComplete="password"
+        textContentType="password"
+        error={errors.password}
+        editable={!loading}
+        focusColor={AUTH_CORAL}
+        style={styles.inputInner}
+      />
 
-        <Text style={[styles.title, { color: colors.text }]}>Account access</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Use your email and password. If your account is unverified, we will send a new code.</Text>
+      <Link href="/(auth)/forgot-password" asChild>
+        <Text style={styles.forgotPassword}>Forgot password?</Text>
+      </Link>
 
-        <Input
-          label="Email Address"
-          icon={<Ionicons name="mail-outline" size={18} color={colors.textTertiary} />}
-          value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            if (errors.email) {
-              setErrors({ ...errors, email: undefined });
-            }
-          }}
-          placeholder="you@example.com"
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoComplete="email"
-          textContentType="emailAddress"
-          error={errors.email}
-          editable={!loading}
-        />
+      <Button
+        title={loading ? 'Signing In...' : 'Login'}
+        onPress={handleSignIn}
+        disabled={loading}
+        loading={loading}
+        variant="primary"
+        fullWidth
+        size="lg"
+        style={styles.primaryBtn}
+      />
 
-        <Input
-          label="Password"
-          icon={<Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} />}
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            if (errors.password) {
-              setErrors({ ...errors, password: undefined });
-            }
-          }}
-          placeholder="Enter your password"
-          secureTextEntry
-          showPasswordToggle
-          autoCapitalize="none"
-          autoComplete="password"
-          textContentType="password"
-          error={errors.password}
-          editable={!loading}
-        />
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>OR</Text>
+        <View style={styles.dividerLine} />
+      </View>
 
-        <Link href="/(auth)/forgot-password" asChild>
-          <Text style={[styles.forgotPassword, { color: colors.primary }]}>Forgot password?</Text>
-        </Link>
-
+      <Link href="/(auth)" asChild>
         <Button
-          title={loading ? 'Signing In...' : 'Sign In'}
-          onPress={handleSignIn}
-          disabled={loading}
-          loading={loading}
-          variant="gradient"
+          title="Sign in with Email Code"
+          onPress={() => {}}
+          variant="outline"
           fullWidth
           size="lg"
-          style={styles.primaryCta}
         />
-
-        <View style={styles.divider}>
-          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-          <Text style={[styles.dividerText, { color: colors.textTertiary }]}>OR</Text>
-          <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-        </View>
-
-        <Link href="/(auth)" asChild>
-          <Button
-            title="Sign in with Email Code"
-            onPress={() => {}}
-            variant="outline"
-            fullWidth
-            size="lg"
-          />
-        </Link>
-      </Card>
+      </Link>
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: colors.textSecondary }]}>Don't have an account?</Text>
+        <Text style={styles.footerText}>Don't have an account?</Text>
         <Link href="/(auth)/register" asChild>
-          <Text style={[styles.footerLink, { color: colors.primary }]}>Sign Up</Text>
+          <Text style={styles.footerLink}>Sign Up</Text>
         </Link>
       </View>
-    </AuthScaffold>
+    </AuthWaveLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    width: '100%',
-    borderRadius: borderRadius.xl,
-    marginBottom: spacing.md,
+  formHeading: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#222',
+    marginBottom: 20,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginBottom: spacing.sm,
-  },
-  badgeText: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.bold,
-    textTransform: 'uppercase',
-  },
-  title: {
-    fontSize: fontSize.xl,
-    fontWeight: fontWeight.black,
-  },
-  subtitle: {
-    fontSize: fontSize.sm,
-    marginTop: 4,
-    marginBottom: spacing.md,
-    lineHeight: fontSize.sm * 1.35,
+  inputInner: {
+    backgroundColor: '#FAFAFA',
   },
   forgotPassword: {
     textAlign: 'right',
     fontSize: fontSize.sm,
     fontWeight: fontWeight.semibold,
+    color: AUTH_CORAL,
     marginTop: -spacing.xs,
     marginBottom: spacing.md,
   },
-  primaryCta: {
-    borderRadius: borderRadius.full,
+  primaryBtn: {
+    backgroundColor: AUTH_CORAL,
+    borderRadius: 999,
+    borderColor: AUTH_CORAL,
   },
   divider: {
     flexDirection: 'row',
@@ -239,23 +194,28 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
+    backgroundColor: AUTH_INPUT_BORDER,
   },
   dividerText: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,
+    color: '#888888',
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
-    marginTop: spacing.sm,
+    marginTop: spacing.lg,
+    paddingBottom: spacing.md,
   },
   footerText: {
     fontSize: fontSize.sm,
+    color: '#888888',
   },
   footerLink: {
     fontSize: fontSize.sm,
     fontWeight: fontWeight.bold,
+    color: AUTH_CORAL,
   },
 });
