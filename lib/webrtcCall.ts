@@ -291,6 +291,8 @@ export class DmWebRTCCall {
   private muted = false;
   private closed = false;
   private videoEnabled = true;
+  private pendingCandidates: AnyCandidate[] = [];
+  private remoteDescSet = false;
 
   constructor(options: DmWebRTCCallOptions) {
     this.options = options;
@@ -401,6 +403,8 @@ export class DmWebRTCCall {
     this.emitState('connecting');
     this.startInitialConnectWindow();
     await this.pc.setRemoteDescription(new WebRTC.RTCSessionDescription(offer));
+    this.remoteDescSet = true;
+    await this.flushPendingCandidates();
 
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
@@ -415,15 +419,33 @@ export class DmWebRTCCall {
     if (this.closed || !this.pc) return;
     const WebRTC = getWebRTCModule();
     await this.pc.setRemoteDescription(new WebRTC.RTCSessionDescription(answer));
+    this.remoteDescSet = true;
+    await this.flushPendingCandidates();
   }
 
   async handleIceCandidate(candidate: AnyCandidate) {
     if (this.closed || !this.pc) return;
+    if (!this.remoteDescSet) {
+      this.pendingCandidates.push(candidate);
+      return;
+    }
     try {
       const WebRTC = getWebRTCModule();
       await this.pc.addIceCandidate(new WebRTC.RTCIceCandidate(candidate));
     } catch {
-      // Some ICE candidates may arrive before remote description is fully set.
+      // ignore
+    }
+  }
+
+  private async flushPendingCandidates() {
+    const candidates = this.pendingCandidates.splice(0);
+    for (const c of candidates) {
+      try {
+        const WebRTC = getWebRTCModule();
+        await this.pc?.addIceCandidate(new WebRTC.RTCIceCandidate(c));
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -450,6 +472,8 @@ export class DmWebRTCCall {
   async close(sendEndedSignal: boolean, finalState: 'off' | 'failed' = 'off') {
     if (this.closed) return;
     this.closed = true;
+    this.pendingCandidates = [];
+    this.remoteDescSet = false;
     this.clearReconnectTimer();
     this.clearInitialConnectTimer();
 

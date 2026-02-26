@@ -131,6 +131,7 @@ export function ChatThreadScreen() {
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const callRef = useRef<DmWebRTCCall | null>(null);
   const callInitPromiseRef = useRef<Promise<DmWebRTCCall | null> | null>(null);
+  const pendingIceCandidatesRef = useRef<Record<string, unknown>[]>([]);
   const callInviteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageListRef = useRef<FlatList<DmMessage> | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -289,6 +290,7 @@ export function ChatThreadScreen() {
     async (sendEndedSignal: boolean) => {
       clearOutgoingTimer();
       callInitPromiseRef.current = null;
+      pendingIceCandidatesRef.current = [];
       setIncomingInvite(null);
       setOutgoingMode(null);
       setCallState('off');
@@ -684,6 +686,10 @@ export function ChatThreadScreen() {
           const client = await ensureCallClient(mode);
           if (!client) return;
           await client.handleOffer(data.offer as { type: 'offer' | 'answer'; sdp: string });
+          const pending = pendingIceCandidatesRef.current.splice(0);
+          for (const c of pending) {
+            await client.handleIceCandidate(c).catch(() => null);
+          }
         })();
       })
       .on('broadcast', { event: 'call-answer' }, ({ payload }) => {
@@ -694,6 +700,10 @@ export function ChatThreadScreen() {
           if (data.conversationId !== conversationIdRef.current) return;
           if (!data.answer || !callRef.current) return;
           await callRef.current.handleAnswer(data.answer as { type: 'offer' | 'answer'; sdp: string });
+          const pending = pendingIceCandidatesRef.current.splice(0);
+          for (const c of pending) {
+            await callRef.current?.handleIceCandidate(c).catch(() => null);
+          }
         })();
       })
       .on('broadcast', { event: 'call-ice' }, ({ payload }) => {
@@ -702,7 +712,11 @@ export function ChatThreadScreen() {
           if (!data) return;
           if (data.toId && data.toId !== userIdRef.current) return;
           if (data.conversationId !== conversationIdRef.current) return;
-          if (!data.candidate || !callRef.current) return;
+          if (!data.candidate) return;
+          if (!callRef.current) {
+            pendingIceCandidatesRef.current.push(data.candidate as Record<string, unknown>);
+            return;
+          }
           await callRef.current.handleIceCandidate(data.candidate as Record<string, unknown>);
         })();
       })
