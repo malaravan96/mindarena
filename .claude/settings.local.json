@@ -13,7 +13,14 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Bash(find:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(where java)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "Bash(echo \"sdk.dir=C:\\\\\\\\Users\\\\\\\\Malar\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Android\\\\\\\\Sdk\")",
+      "Bash(export ANDROID_HOME=\"$LOCALAPPDATA/Android/Sdk\")",
+      "Bash(echo \"$LOCALAPPDATA\")",
+      "Bash(export ANDROID_HOME=\"C:/Users/Malar/AppData/Local/Android/Sdk\")",
+      "Bash(export PATH=\"$ANDROID_HOME/platform-tools:$PATH\")"
     ],
     "deny": [],
     "ask": []

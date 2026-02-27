@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.mindarena.pip">
+    <!-- This module's manifest; permissions and components are declared via the config plugin -->
+</manifest>

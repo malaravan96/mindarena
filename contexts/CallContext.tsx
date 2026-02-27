@@ -11,6 +11,7 @@ export type ActiveCallState = {
   callMuted: boolean;
   remoteStreamUrl: string | null;
   localStreamUrl: string | null;
+  isInPiPMode: boolean;
 };
 
 type CallContextValue = {
@@ -19,6 +20,9 @@ type CallContextValue = {
   clearCallState: () => void;
   registerEndCallFn: (fn: (() => void) | null) => void;
   endCallFromPiP: () => void;
+  registerToggleMuteFn: (fn: (() => void) | null) => void;
+  toggleMuteFromPiP: () => void;
+  setIsInPiPMode: (val: boolean) => void;
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -26,6 +30,7 @@ const CallContext = createContext<CallContextValue | null>(null);
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
   const endCallFnRef = useRef<(() => void) | null>(null);
+  const toggleMuteFnRef = useRef<(() => void) | null>(null);
 
   const publishCallState = useCallback((state: ActiveCallState) => {
     setActiveCall(state);
@@ -44,8 +49,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setActiveCall(null);
   }, []);
 
+  const registerToggleMuteFn = useCallback((fn: (() => void) | null) => {
+    toggleMuteFnRef.current = fn;
+  }, []);
+
+  const toggleMuteFromPiP = useCallback(() => {
+    toggleMuteFnRef.current?.();
+  }, []);
+
+  const setIsInPiPMode = useCallback((val: boolean) => {
+    setActiveCall((prev) => (prev ? { ...prev, isInPiPMode: val } : null));
+  }, []);
+
   return (
-    <CallContext.Provider value={{ activeCall, publishCallState, clearCallState, registerEndCallFn, endCallFromPiP }}>
+    <CallContext.Provider
+      value={{
+        activeCall,
+        publishCallState,
+        clearCallState,
+        registerEndCallFn,
+        endCallFromPiP,
+        registerToggleMuteFn,
+        toggleMuteFromPiP,
+        setIsInPiPMode,
+      }}
+    >
       {children}
     </CallContext.Provider>
   );

@@ -51,6 +51,13 @@ import { getConversationSettings, setDisappearingMessages } from '@/lib/dmSettin
 import { reportUser, type ReportReason } from '@/lib/report';
 import { sendImageMessage, sendVoiceMessage } from '@/lib/dmAttachments';
 import type { CallUiState, DmMessage, DmReactionGroup } from '@/lib/types';
+import { usePiP } from '@/modules/pip/usePiP';
+import {
+  setCallActive as nativeSetCallActive,
+  updatePiPActions,
+  startForegroundService,
+  stopForegroundService,
+} from '@/modules/pip';
 import { FullScreenCallOverlay } from '@/components/chat/FullScreenCallOverlay';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { EmojiPicker } from '@/components/chat/EmojiPicker';
@@ -91,7 +98,7 @@ export function ChatThreadScreen() {
   const router = useRouter();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const { colors } = useTheme();
-  const { publishCallState, clearCallState, registerEndCallFn } = useCall();
+  const { publishCallState, clearCallState, registerEndCallFn, registerToggleMuteFn, setIsInPiPMode } = useCall();
   const { setActiveConversationId, consumePendingIncomingInvite } = useGlobalNotifications();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
@@ -162,6 +169,24 @@ export function ChatThreadScreen() {
   useEffect(() => { userIdRef.current = userId; }, [userId]);
   useEffect(() => { peerIdRef.current = peerId; }, [peerId]);
   useEffect(() => { conversationIdRef.current = conversationId ?? null; }, [conversationId]);
+
+  // ── System PiP (handlers use refs so they can be declared before sendCallSignal/endCall) ──
+  const pipHandlersRef = useRef({
+    onToggleMute: () => {},
+    onHangUp: () => {},
+    onCallKitMute: (_isMuted: boolean) => {},
+  });
+  const pipHandlers = useMemo(() => ({
+    onToggleMute: () => pipHandlersRef.current.onToggleMute(),
+    onHangUp: () => pipHandlersRef.current.onHangUp(),
+    onCallKitMute: (m: boolean) => pipHandlersRef.current.onCallKitMute(m),
+  }), []);
+  const { isInPiP } = usePiP(pipHandlers);
+
+  // Sync PiP mode to CallContext
+  useEffect(() => {
+    setIsInPiPMode(isInPiP);
+  }, [isInPiP, setIsInPiPMode]);
 
   // Load persisted wallpaper for this conversation
   useEffect(() => {
@@ -330,6 +355,10 @@ export function ChatThreadScreen() {
       setRemoteStreamUrl(null);
       await stopCallAudio().catch(() => null);
 
+      // Clean up native PiP / foreground service
+      nativeSetCallActive(false);
+      stopForegroundService();
+
       const active = callRef.current;
       callRef.current = null;
       if (active) {
@@ -338,6 +367,39 @@ export function ChatThreadScreen() {
     },
     [clearOutgoingTimer],
   );
+
+  // Wire up PiP action handlers now that sendCallSignal and endCall are declared
+  pipHandlersRef.current = {
+    onToggleMute: () => {
+      if (!callRef.current) return;
+      const muted = callRef.current.toggleMute();
+      setCallMuted(muted);
+      updatePiPActions(muted);
+      void sendCallSignal('call-mute', {
+        conversationId: conversationIdRef.current,
+        userId: userIdRef.current,
+        toId: peerIdRef.current,
+        muted,
+      });
+    },
+    onHangUp: () => {
+      void endCall(true);
+    },
+    onCallKitMute: (isMuted: boolean) => {
+      if (!callRef.current) return;
+      const current = callRef.current.isMuted;
+      if (current !== isMuted) {
+        callRef.current.toggleMute();
+        setCallMuted(isMuted);
+        void sendCallSignal('call-mute', {
+          conversationId: conversationIdRef.current,
+          userId: userIdRef.current,
+          toId: peerIdRef.current,
+          muted: isMuted,
+        });
+      }
+    },
+  };
 
   const ensureCallClient = useCallback(
     async (mode: CallMode) => {
@@ -865,11 +927,20 @@ export function ChatThreadScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearOutgoingTimer, endCall]);
 
-  // Register endCall fn with context so PiP can end the call
+  // Register endCall + toggleMute fns with context so PiP can control the call
   useEffect(() => {
     registerEndCallFn(() => endCall(true));
-    return () => registerEndCallFn(null);
-  }, [endCall, registerEndCallFn]);
+    registerToggleMuteFn(() => {
+      if (!callRef.current) return;
+      const muted = callRef.current.toggleMute();
+      setCallMuted(muted);
+      updatePiPActions(muted);
+    });
+    return () => {
+      registerEndCallFn(null);
+      registerToggleMuteFn(null);
+    };
+  }, [endCall, registerEndCallFn, registerToggleMuteFn]);
 
   // Sync call state to context for PiP display
   useEffect(() => {
@@ -888,9 +959,25 @@ export function ChatThreadScreen() {
       callMuted,
       remoteStreamUrl,
       localStreamUrl,
+      isInPiPMode: isInPiP,
     });
   }, [callState, incomingInvite, outgoingMode, callMuted, remoteStreamUrl, localStreamUrl, activeCallMode,
-      conversationId, peerId, peerName, peerAvatarUrl, publishCallState, clearCallState]);
+      conversationId, peerId, peerName, peerAvatarUrl, publishCallState, clearCallState, isInPiP]);
+
+  // ── Native PiP lifecycle: activate/deactivate foreground service + PiP ──
+  useEffect(() => {
+    if (callState === 'live' && conversationId && peerId) {
+      nativeSetCallActive(true, {
+        peerName,
+        hasVideo: activeCallMode === 'video',
+        isMuted: callMuted,
+      });
+      startForegroundService(peerName);
+    } else if (callState === 'off') {
+      nativeSetCallActive(false);
+      stopForegroundService();
+    }
+  }, [callState, conversationId, peerId, peerName, activeCallMode, callMuted]);
 
   async function pickImage(fromCamera: boolean) {
     if (!conversationId || isBlockedState) return;
@@ -1385,6 +1472,7 @@ export function ChatThreadScreen() {
         opponentMuted={opponentMuted}
         localStreamUrl={localStreamUrl}
         remoteStreamUrl={remoteStreamUrl}
+        isInPiPMode={isInPiP}
         onAccept={() => void acceptIncomingCall()}
         onDecline={() => void declineIncomingCall()}
         onEndCall={() => void endCall(true)}

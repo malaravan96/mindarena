@@ -42,6 +42,9 @@ type Props = {
   localStreamUrl: string | null;
   remoteStreamUrl: string | null;
 
+  // PiP
+  isInPiPMode?: boolean;
+
   // Actions
   onAccept: () => void;
   onDecline: () => void;
@@ -74,6 +77,7 @@ export function FullScreenCallOverlay({
   onToggleMute,
   onToggleCamera,
   onToggleSpeaker,
+  isInPiPMode = false,
 }: Props) {
   const insets = useSafeAreaInsets();
   const duration = useCallDurationTimer(callState);
@@ -102,6 +106,28 @@ export function FullScreenCallOverlay({
           : isLive
             ? duration
             : '';
+
+  // ── When in system PiP mode, render only the remote video (no controls/UI) ──
+  // Android captures the Activity content for the PiP window, so we render
+  // a clean full-screen video without any overlays.
+  if (isInPiPMode && showVideoBackground) {
+    return (
+      <Modal
+        visible={visible}
+        animationType="none"
+        transparent={false}
+        statusBarTranslucent
+      >
+        <View style={styles.root}>
+          <RtcVideoView
+            streamURL={remoteStreamUrl}
+            style={StyleSheet.absoluteFill}
+            emptyLabel=""
+          />
+        </View>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

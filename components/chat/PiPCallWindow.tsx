@@ -22,7 +22,8 @@ export function PiPCallWindow() {
   const duration = useCallDurationTimer(activeCall?.callState ?? 'off');
 
   const isOnChatThread = pathname.includes('chat-thread');
-  if (!activeCall || isOnChatThread) return null;
+  // Hide if no call, on the chat thread, or if system PiP is active (Android)
+  if (!activeCall || isOnChatThread || activeCall.isInPiPMode) return null;
 
   const { conversationId, peerName, peerAvatarUrl, callState, callMode, callMuted, remoteStreamUrl } = activeCall;
 
