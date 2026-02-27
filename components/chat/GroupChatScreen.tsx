@@ -41,6 +41,7 @@ import { ForwardMessageSheet } from '@/components/chat/ForwardMessageSheet';
 import { PollCreatorSheet } from '@/components/chat/PollCreatorSheet';
 import { MessageSearchSheet } from '@/components/chat/MessageSearchSheet';
 import { MessageBubble } from '@/components/chat/MessageBubble';
+import { setActiveGroupId } from '@/lib/notificationState';
 
 const TYPING_RESET_MS = 4000;
 
@@ -136,6 +137,13 @@ export function GroupChatScreen() {
       return undefined;
     }, [groupId]),
   );
+
+  // Track active group so push banners are suppressed while viewing this chat
+  useEffect(() => {
+    if (!groupId) return;
+    setActiveGroupId(groupId);
+    return () => setActiveGroupId(null);
+  }, [groupId]);
 
   // Realtime subscription
   useEffect(() => {

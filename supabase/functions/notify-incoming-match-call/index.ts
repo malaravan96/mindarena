@@ -49,9 +49,13 @@ Deno.serve(async (req) => {
         body: `${caller_name} started voice chat`,
         sound: 'default',
         priority: 'high',
+        channelId: 'calls',
+        categoryId: 'incoming_call',
+        _contentAvailable: true,
         data: {
           type: 'pvp-call',
           match_id,
+          caller_name,
         },
       })),
     );

@@ -80,6 +80,8 @@ Deno.serve(async (req) => {
       body: messageBody,
       data: { type: 'group', group_id: record.group_id },
       sound: 'default',
+      channelId: 'default',
+      priority: 'high',
     }));
 
     for (let i = 0; i < notifications.length; i += BATCH_SIZE) {

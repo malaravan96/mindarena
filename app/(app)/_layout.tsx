@@ -93,9 +93,13 @@ function AppLayoutContent() {
       const data = raw as NotificationPayload | null | undefined;
       if (data?.type === 'dm') {
         if (typeof data.conversation_id !== 'string') return;
+        const event = (data as any).event;
         router.push({
           pathname: '/chat-thread',
-          params: { conversationId: data.conversation_id },
+          params: {
+            conversationId: data.conversation_id,
+            ...(event === 'dm-call' ? { autoAnswerCall: 'true' } : {}),
+          },
         });
       } else if (data?.type === 'group') {
         const groupId = (data as any).group_id;
@@ -103,6 +107,13 @@ function AppLayoutContent() {
         router.push({
           pathname: '/group-chat',
           params: { groupId },
+        });
+      } else if (data?.type === 'pvp-call') {
+        const matchId = (data as any).match_id;
+        if (typeof matchId !== 'string') return;
+        router.push({
+          pathname: '/pvp',
+          params: { matchId },
         });
       }
     };

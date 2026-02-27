@@ -104,6 +104,7 @@ Deno.serve(async (req) => {
           body: previewBody,
           sound: 'default',
           priority: 'high',
+          channelId: 'default',
           data: {
             type: 'dm',
             conversation_id: message.conversation_id,

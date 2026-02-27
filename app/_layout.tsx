@@ -8,15 +8,31 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { getActiveConversationId, getActiveGroupId } from '@/lib/notificationState';
 
-// Set at module level so it is registered before any cold-start notification routing
+// Set at module level so it is registered before any cold-start notification routing.
+// Suppress the banner when the user is already viewing the relevant chat.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data as Record<string, unknown> | undefined;
+
+    if (data) {
+      // Suppress DM notification if user is viewing that conversation
+      if (data.type === 'dm' && typeof data.conversation_id === 'string') {
+        if (data.conversation_id === getActiveConversationId()) {
+          return { shouldPlaySound: false, shouldSetBadge: true, shouldShowBanner: false, shouldShowList: false };
+        }
+      }
+      // Suppress group notification if user is viewing that group
+      if (data.type === 'group' && typeof data.group_id === 'string') {
+        if (data.group_id === getActiveGroupId()) {
+          return { shouldPlaySound: false, shouldSetBadge: true, shouldShowBanner: false, shouldShowList: false };
+        }
+      }
+    }
+
+    return { shouldPlaySound: true, shouldSetBadge: true, shouldShowBanner: true, shouldShowList: true };
+  },
 });
 
 function RootNavigator() {

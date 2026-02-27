@@ -16,11 +16,20 @@ export async function registerForPushNotifications() {
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
+      name: 'Messages',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#2563eb',
       sound: 'default',
+    });
+    await Notifications.setNotificationChannelAsync('calls', {
+      name: 'Calls',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 200, 500, 200, 500],
+      lightColor: '#22c55e',
+      sound: 'default',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      bypassDnd: true,
     });
   }
 
@@ -57,14 +66,6 @@ export async function upsertCurrentUserPushToken() {
   }
 
   return token;
-}
-
-export async function notifyDmMessage(messageId: string) {
-  if (!messageId) return;
-  const { error } = await supabase.functions.invoke('notify-dm-message', {
-    body: { message_id: messageId },
-  });
-  if (error) throw error;
 }
 
 export async function notifyIncomingMatchCall(matchId: string, calleeId: string, callerName: string) {

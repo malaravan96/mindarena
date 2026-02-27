@@ -37,7 +37,8 @@ import {
   isEncryptedEnvelope,
   isPeerE2eeNotReadyError,
 } from '@/lib/dmE2ee';
-import { notifyDmMessage, notifyIncomingDmCall } from '@/lib/push';
+import { notifyIncomingDmCall } from '@/lib/push';
+import { setActiveConversationId as setActiveConversationIdGlobal } from '@/lib/notificationState';
 import { createPendingCall, getPendingCallForCallee, updatePendingCallStatus } from '@/lib/dmCalls';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
@@ -197,11 +198,15 @@ export function ChatThreadScreen() {
     });
   }, [conversationId]);
 
-  // Register this thread as the active conversation so global overlays are suppressed
+  // Register this thread as the active conversation so global overlays and push banners are suppressed
   useEffect(() => {
     if (!conversationId) return;
     setActiveConversationId(conversationId);
-    return () => setActiveConversationId(null);
+    setActiveConversationIdGlobal(conversationId);
+    return () => {
+      setActiveConversationId(null);
+      setActiveConversationIdGlobal(null);
+    };
   }, [conversationId, setActiveConversationId]);
 
   const sortedMessages = useMemo(
@@ -1111,9 +1116,7 @@ export function ChatThreadScreen() {
       });
       setInput('');
       setReplyTarget(null);
-      void notifyDmMessage(row.id).catch((error) => {
-        console.warn('DM push notify failed', error);
-      });
+      // Push notification is now handled server-side via DB webhook on dm_messages INSERT
     } catch (e: any) {
       showAlert('Send failed', e?.message ?? 'Could not send message');
     } finally {

@@ -50,11 +50,15 @@ Deno.serve(async (req) => {
         body: `${caller_name} is calling you`,
         sound: 'default',
         priority: 'high',
+        channelId: 'calls',
+        categoryId: 'incoming_call',
+        _contentAvailable: true,
         data: {
           type: 'dm',
           conversation_id,
           event: 'dm-call',
           mode: safeMode,
+          caller_name,
         },
       })),
     );

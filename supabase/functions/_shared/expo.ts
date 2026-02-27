@@ -5,6 +5,9 @@ export type ExpoPushMessage = {
   data?: Record<string, unknown>;
   sound?: 'default';
   priority?: 'default' | 'normal' | 'high';
+  channelId?: string;
+  categoryId?: string;
+  _contentAvailable?: boolean;
 };
 
 export async function sendExpoPush(messages: ExpoPushMessage[]) {
