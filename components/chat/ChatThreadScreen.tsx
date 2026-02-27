@@ -209,12 +209,22 @@ export function ChatThreadScreen() {
     [messages],
   );
 
+  const initialScrollDoneRef = useRef(false);
+
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
+    const animated = initialScrollDoneRef.current;
     const timer = setTimeout(() => {
-      messageListRef.current?.scrollToEnd({ animated: true });
-    }, 30);
+      messageListRef.current?.scrollToEnd({ animated });
+    }, 100);
     return () => clearTimeout(timer);
+  }, [sortedMessages.length]);
+
+  const onContentSizeChange = useCallback(() => {
+    if (!initialScrollDoneRef.current && sortedMessages.length > 0) {
+      initialScrollDoneRef.current = true;
+      messageListRef.current?.scrollToEnd({ animated: false });
+    }
   }, [sortedMessages.length]);
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -1523,6 +1533,7 @@ export function ChatThreadScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderMessageItem}
             onScroll={onListScroll}
+            onContentSizeChange={onContentSizeChange}
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
             ListEmptyComponent={

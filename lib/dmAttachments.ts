@@ -8,6 +8,7 @@
  * Only the text `body` field is E2EE encrypted.
  */
 
+import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
 import { getCurrentUserId } from '@/lib/dm';
 import type { DmMessage, DmMessageType } from '@/lib/types';
@@ -95,7 +96,7 @@ export async function sendImageMessage(
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
 
-  const messageId = crypto.randomUUID();
+  const messageId = Crypto.randomUUID();
   const storagePath = await uploadDmAttachment({
     conversationId,
     messageId,
@@ -146,7 +147,7 @@ export async function sendVoiceMessage(
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
 
-  const messageId = crypto.randomUUID();
+  const messageId = Crypto.randomUUID();
   const storagePath = await uploadDmAttachment({
     conversationId,
     messageId,
@@ -197,7 +198,7 @@ export async function sendFileMessage(
   const uid = await getCurrentUserId();
   if (!uid) throw new Error('Not signed in');
 
-  const messageId = crypto.randomUUID();
+  const messageId = Crypto.randomUUID();
   const storagePath = await uploadDmAttachment({
     conversationId,
     messageId,
