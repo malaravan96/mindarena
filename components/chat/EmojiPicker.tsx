@@ -1,16 +1,17 @@
-import React, { useRef, useEffect } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  StyleSheet,
-  Animated,
+import React, { useEffect } from 'react';
+import { Modal, View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withDelay,
+  withSequence,
   Easing,
-} from 'react-native';
+} from 'react-native-reanimated';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import { TwemojiSvg } from '@/components/chat/TwemojiSvg';
 
 const EMOJI_CATEGORIES: { label: string; emojis: string[] }[] = [
   {
@@ -53,22 +54,80 @@ interface AnimatedEmojiProps {
 }
 
 const AnimatedEmoji = React.memo(function AnimatedEmoji({ emoji, onPress }: AnimatedEmojiProps) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const scale = useSharedValue(1);
+  const rotation = useSharedValue(0);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: scale.value },
+      { rotate: `${rotation.value}deg` },
+    ],
+  }));
 
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, { toValue: 0.72, useNativeDriver: true, tension: 200, friction: 8 }).start();
+    scale.value = withSpring(0.72, { damping: 8, stiffness: 200, mass: 0.5 });
+    rotation.value = withSequence(
+      withTiming(-8, { duration: 50 }),
+      withTiming(8, { duration: 50 }),
+      withTiming(-4, { duration: 40 }),
+      withTiming(0, { duration: 40 }),
+    );
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 120, friction: 6 }).start();
+    scale.value = withSpring(1, { damping: 6, stiffness: 120, mass: 0.8 });
   };
 
   return (
     <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} style={styles.emojiBtn}>
-      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-        <Text style={styles.emojiText}>{emoji}</Text>
+      <Animated.View style={animStyle}>
+        <TwemojiSvg emoji={emoji} size={24} />
       </Animated.View>
     </Pressable>
+  );
+});
+
+interface CategoryRowProps {
+  cat: { label: string; emojis: string[] };
+  index: number;
+  visible: boolean;
+  colors: any;
+  onSelect: (emoji: string) => void;
+  onClose: () => void;
+}
+
+const CategoryRow = React.memo(function CategoryRow({ cat, index, visible, colors, onSelect, onClose }: CategoryRowProps) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(20);
+
+  useEffect(() => {
+    if (visible) {
+      opacity.value = withDelay(index * 40, withTiming(1, { duration: 250, easing: Easing.out(Easing.cubic) }));
+      translateY.value = withDelay(index * 40, withSpring(0, { damping: 18, stiffness: 160, mass: 1 }));
+    } else {
+      opacity.value = 0;
+      translateY.value = 20;
+    }
+  }, [visible, index, opacity, translateY]);
+
+  const rowStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.category, rowStyle]}>
+      <Text style={[styles.catLabel, { color: colors.textSecondary }]}>{cat.label}</Text>
+      <View style={styles.emojiGrid}>
+        {cat.emojis.map((emoji) => (
+          <AnimatedEmoji
+            key={emoji}
+            emoji={emoji}
+            onPress={() => { onSelect(emoji); onClose(); }}
+          />
+        ))}
+      </View>
+    </Animated.View>
   );
 });
 
@@ -81,24 +140,6 @@ interface EmojiPickerProps {
 export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
   const { colors } = useTheme();
 
-  const contentOpacity = useRef(new Animated.Value(0)).current;
-  const contentTranslateY = useRef(new Animated.Value(16)).current;
-
-  useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.timing(contentOpacity, { toValue: 1, duration: 280, delay: 80, useNativeDriver: true }),
-        Animated.timing(contentTranslateY, {
-          toValue: 0, duration: 320, delay: 80,
-          easing: Easing.out(Easing.cubic), useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      contentOpacity.setValue(0);
-      contentTranslateY.setValue(16);
-    }
-  }, [visible, contentOpacity, contentTranslateY]);
-
   return (
     <Modal
       visible={visible}
@@ -109,24 +150,19 @@ export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <Animated.View style={{ opacity: contentOpacity, transform: [{ translateY: contentTranslateY }] }}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-            {EMOJI_CATEGORIES.map((cat) => (
-              <View key={cat.label} style={styles.category}>
-                <Text style={[styles.catLabel, { color: colors.textSecondary }]}>{cat.label}</Text>
-                <View style={styles.emojiGrid}>
-                  {cat.emojis.map((emoji) => (
-                    <AnimatedEmoji
-                      key={emoji}
-                      emoji={emoji}
-                      onPress={() => { onSelect(emoji); onClose(); }}
-                    />
-                  ))}
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-        </Animated.View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {EMOJI_CATEGORIES.map((cat, i) => (
+            <CategoryRow
+              key={cat.label}
+              cat={cat}
+              index={i}
+              visible={visible}
+              colors={colors}
+              onSelect={onSelect}
+              onClose={onClose}
+            />
+          ))}
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -176,5 +212,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emojiText: { fontSize: 24 },
 });

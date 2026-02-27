@@ -1,11 +1,28 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Linking, Image, PanResponder, Animated, Modal } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, Linking, Image, Modal } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withRepeat,
+  withSequence,
+  withDelay,
+  interpolate,
+  Easing,
+  runOnJS,
+  FadeIn,
+  FadeOut,
+  type SharedValue,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
 import type { DmMessage, DmMessageStatus, DmReactionGroup } from '@/lib/types';
 import { PollBubble } from '@/components/chat/PollBubble';
 import { isSingleEmoji } from '@/lib/emojiUtils';
+import { TwemojiSvg } from '@/components/chat/TwemojiSvg';
 
 interface MessageBubbleProps {
   item: DmMessage;
@@ -98,6 +115,10 @@ function ReplyQuoteBox({ replyTo, senderName, onPress, primaryColor, textColor, 
   );
 }
 
+// ---------------------------------------------------------------------------
+// Reaction pills with TwemojiSvg + animated entrance
+// ---------------------------------------------------------------------------
+
 interface ReactionPillsRowProps {
   reactions: DmReactionGroup[];
   onReactionPress?: (emoji: string) => void;
@@ -108,39 +129,74 @@ interface ReactionPillsRowProps {
   textColor: string;
 }
 
+const AnimatedReactionPill = React.memo(function AnimatedReactionPill({
+  group,
+  index,
+  onReactionPress,
+  primaryColor,
+  surfaceColor,
+  borderColor,
+  textColor,
+}: {
+  group: DmReactionGroup;
+  index: number;
+  onReactionPress?: (emoji: string) => void;
+  primaryColor: string;
+  surfaceColor: string;
+  borderColor: string;
+  textColor: string;
+}) {
+  return (
+    <Animated.View entering={FadeIn.delay(index * 50).springify().damping(12).stiffness(180)} exiting={FadeOut.duration(200)}>
+      <Pressable
+        onPress={() => onReactionPress?.(group.emoji)}
+        style={[
+          styles.reactionPill,
+          {
+            backgroundColor: group.reactedByMe ? `${primaryColor}18` : surfaceColor,
+            borderColor: group.reactedByMe ? primaryColor : borderColor,
+          },
+        ]}
+      >
+        <TwemojiSvg emoji={group.emoji} size={14} />
+        {group.count > 1 && (
+          <Text style={[styles.reactionCount, { color: group.reactedByMe ? primaryColor : textColor }]}>
+            {group.count}
+          </Text>
+        )}
+      </Pressable>
+    </Animated.View>
+  );
+});
+
 function ReactionPillsRow({ reactions, onReactionPress, isOwn, primaryColor, surfaceColor, borderColor, textColor }: ReactionPillsRowProps) {
   return (
     <View style={[styles.reactionRow, { justifyContent: isOwn ? 'flex-end' : 'flex-start' }]}>
-      {reactions.map((group) => (
-        <Pressable
+      {reactions.map((group, i) => (
+        <AnimatedReactionPill
           key={group.emoji}
-          onPress={() => onReactionPress?.(group.emoji)}
-          style={[
-            styles.reactionPill,
-            {
-              backgroundColor: group.reactedByMe ? `${primaryColor}18` : surfaceColor,
-              borderColor: group.reactedByMe ? primaryColor : borderColor,
-            },
-          ]}
-        >
-          <Text style={styles.reactionEmoji}>{group.emoji}</Text>
-          {group.count > 1 && (
-            <Text style={[styles.reactionCount, { color: group.reactedByMe ? primaryColor : textColor }]}>
-              {group.count}
-            </Text>
-          )}
-        </Pressable>
+          group={group}
+          index={i}
+          onReactionPress={onReactionPress}
+          primaryColor={primaryColor}
+          surfaceColor={surfaceColor}
+          borderColor={borderColor}
+          textColor={textColor}
+        />
       ))}
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// BurstOverlay — 8 emoji copies fly outward on tap, rendered in a Modal
-// so they can escape the FlatList clipping boundary.
+// BurstOverlay — "Supernova" effect: squash → 12 multi-ring particles → sparkle settle
 // ---------------------------------------------------------------------------
 
-const BURST_COUNT = 8;
+const BURST_INNER = 4;
+const BURST_MID = 4;
+const BURST_OUTER = 4;
+const TOTAL_PARTICLES = BURST_INNER + BURST_MID + BURST_OUTER;
+const SPARKLE_COUNT = 6;
 
 interface BurstOverlayProps {
   visible: boolean;
@@ -149,70 +205,226 @@ interface BurstOverlayProps {
   onDone: () => void;
 }
 
+interface ParticleConfig {
+  angle: number; // radians
+  radius: number;
+  duration: number;
+  sizeMultiplier: number;
+}
+
+function generateParticles(): ParticleConfig[] {
+  const particles: ParticleConfig[] = [];
+  // Inner ring: fast, short distance
+  for (let i = 0; i < BURST_INNER; i++) {
+    const angle = ((360 / BURST_INNER) * i + 15) * (Math.PI / 180);
+    particles.push({ angle, radius: 80, duration: 450, sizeMultiplier: 0.7 });
+  }
+  // Mid ring: medium
+  for (let i = 0; i < BURST_MID; i++) {
+    const angle = ((360 / BURST_MID) * i + 0) * (Math.PI / 180);
+    particles.push({ angle, radius: 140, duration: 550, sizeMultiplier: 1.0 });
+  }
+  // Outer ring: slow, far
+  for (let i = 0; i < BURST_OUTER; i++) {
+    const angle = ((360 / BURST_OUTER) * i + 30) * (Math.PI / 180);
+    particles.push({ angle, radius: 200, duration: 650, sizeMultiplier: 0.6 });
+  }
+  return particles;
+}
+
+const PARTICLE_CONFIGS = generateParticles();
+
+// Pre-computed sparkle positions (random-ish offsets around center)
+const SPARKLE_OFFSETS = [
+  { x: -50, y: -40 }, { x: 45, y: -35 },
+  { x: -35, y: 30 }, { x: 55, y: 25 },
+  { x: -15, y: -55 }, { x: 20, y: 50 },
+];
+
 const BurstOverlay = React.memo(function BurstOverlay({ visible, origin, emoji, onDone }: BurstOverlayProps) {
-  const particles = useRef(
-    Array.from({ length: BURST_COUNT }, () => ({
-      translate: new Animated.ValueXY({ x: 0, y: 0 }),
-      opacity: new Animated.Value(0),
-      scale: new Animated.Value(0),
-    })),
-  ).current;
+  // Main emoji squash/stretch
+  const mainScale = useSharedValue(1);
+  // Particle progress values (0 → 1)
+  const particleProgress = PARTICLE_CONFIGS.map(() => useSharedValue(0));
+  // Sparkle scales
+  const sparkleScales = SPARKLE_OFFSETS.map(() => useSharedValue(0));
 
   useEffect(() => {
     if (!visible) return;
-    particles.forEach((p) => {
-      p.translate.setValue({ x: 0, y: 0 });
-      p.opacity.setValue(1);
-      p.scale.setValue(0.2);
+
+    // Reset
+    mainScale.value = 1;
+    particleProgress.forEach((p) => { p.value = 0; });
+    sparkleScales.forEach((s) => { s.value = 0; });
+
+    // Phase 1: Squash & stretch (0-300ms)
+    mainScale.value = withSequence(
+      withTiming(0.7, { duration: 80 }),
+      withSpring(1.2, { damping: 4, stiffness: 300, mass: 0.6 }),
+      withSpring(1.0, { damping: 10, stiffness: 120, mass: 1 }),
+    );
+
+    // Phase 2: Particle burst (100-700ms)
+    particleProgress.forEach((p, i) => {
+      const config = PARTICLE_CONFIGS[i];
+      p.value = withDelay(80 + i * 15, withTiming(1, { duration: config.duration, easing: Easing.out(Easing.cubic) }));
     });
-    const animations = particles.map((p, i) => {
-      const rad = ((360 / BURST_COUNT) * i * Math.PI) / 180;
-      return Animated.parallel([
-        Animated.timing(p.translate, {
-          toValue: { x: Math.cos(rad) * 120, y: Math.sin(rad) * 120 },
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(p.opacity, { toValue: 0, duration: 600, useNativeDriver: true }),
-        Animated.sequence([
-          Animated.timing(p.scale, { toValue: 1.4, duration: 150, useNativeDriver: true }),
-          Animated.timing(p.scale, { toValue: 0.4, duration: 450, useNativeDriver: true }),
-        ]),
-      ]);
+
+    // Phase 3: Sparkle twinkle (400-900ms)
+    sparkleScales.forEach((s, i) => {
+      s.value = withDelay(
+        400 + i * 60,
+        withSequence(
+          withSpring(1, { damping: 6, stiffness: 200, mass: 0.4 }),
+          withDelay(150, withTiming(0, { duration: 200 })),
+        ),
+      );
     });
-    Animated.parallel(animations).start(({ finished }) => {
-      if (finished) onDone();
-    });
-  }, [visible, particles, onDone]);
+
+    // Auto-close after animation
+    const timer = setTimeout(onDone, 950);
+    return () => clearTimeout(timer);
+  }, [visible]);
 
   if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onDone}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onDone}>
-        {particles.map((p, i) => (
-          <Animated.Text
-            key={i}
-            style={[
-              styles.burstParticle,
-              {
-                left: origin.x,
-                top: origin.y,
-                opacity: p.opacity,
-                transform: [
-                  { translateX: p.translate.x },
-                  { translateY: p.translate.y },
-                  { scale: p.scale },
-                ],
-              },
-            ]}
-          >
-            {emoji}
-          </Animated.Text>
+        {/* Main emoji with squash/stretch */}
+        <AnimatedBurstEmoji emoji={emoji} origin={origin} scaleValue={mainScale} size={72} />
+
+        {/* Shockwave ring */}
+        <ShockwaveRing origin={origin} />
+
+        {/* Particles */}
+        {PARTICLE_CONFIGS.map((config, i) => (
+          <BurstParticle
+            key={`p-${i}`}
+            emoji={emoji}
+            origin={origin}
+            config={config}
+            progress={particleProgress[i]}
+          />
+        ))}
+
+        {/* Sparkles */}
+        {SPARKLE_OFFSETS.map((offset, i) => (
+          <SparkleView key={`s-${i}`} origin={origin} offset={offset} scale={sparkleScales[i]} />
         ))}
       </Pressable>
     </Modal>
   );
+});
+
+function AnimatedBurstEmoji({
+  emoji, origin, scaleValue, size,
+}: { emoji: string; origin: { x: number; y: number }; scaleValue: SharedValue<number>; size: number }) {
+  const style = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    left: origin.x - size / 2,
+    top: origin.y - size / 2,
+    transform: [{ scale: scaleValue.value }],
+  }));
+
+  return (
+    <Animated.View style={style}>
+      <TwemojiSvg emoji={emoji} size={size} />
+    </Animated.View>
+  );
+}
+
+function BurstParticle({
+  emoji, origin, config, progress,
+}: { emoji: string; origin: { x: number; y: number }; config: ParticleConfig; progress: SharedValue<number> }) {
+  const particleSize = 32 * config.sizeMultiplier;
+  const style = useAnimatedStyle(() => {
+    const p = progress.value;
+    const tx = Math.cos(config.angle) * config.radius * p;
+    // Curved path: add a slight perpendicular offset that peaks at midpoint
+    const perpendicular = Math.sin(config.angle + Math.PI / 2);
+    const ty = Math.sin(config.angle) * config.radius * p + perpendicular * 20 * Math.sin(p * Math.PI);
+    const s = interpolate(p, [0, 0.2, 0.5, 1], [0.2, 1.3, 1.0, 0.3]);
+    const opacity = interpolate(p, [0, 0.15, 0.7, 1], [0, 1, 0.8, 0]);
+    const rotation = p * 360 * (config.sizeMultiplier > 0.8 ? 1 : -1);
+
+    return {
+      position: 'absolute' as const,
+      left: origin.x - particleSize / 2,
+      top: origin.y - particleSize / 2,
+      opacity,
+      transform: [
+        { translateX: tx },
+        { translateY: ty },
+        { scale: s },
+        { rotate: `${rotation}deg` },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View style={style}>
+      <TwemojiSvg emoji={emoji} size={particleSize} />
+    </Animated.View>
+  );
+}
+
+function ShockwaveRing({ origin }: { origin: { x: number; y: number } }) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.cubic) });
+  }, []);
+
+  const style = useAnimatedStyle(() => {
+    const size = interpolate(progress.value, [0, 1], [20, 160]);
+    const opacity = interpolate(progress.value, [0, 0.3, 1], [0.4, 0.2, 0]);
+    return {
+      position: 'absolute' as const,
+      left: origin.x - size / 2,
+      top: origin.y - size / 2,
+      width: size,
+      height: size,
+      borderRadius: size / 2,
+      borderWidth: 2,
+      borderColor: `rgba(255,255,255,${opacity})`,
+    };
+  });
+
+  return <Animated.View style={style} />;
+}
+
+function SparkleView({
+  origin, offset, scale,
+}: { origin: { x: number; y: number }; offset: { x: number; y: number }; scale: SharedValue<number> }) {
+  const style = useAnimatedStyle(() => {
+    const s = scale.value;
+    const rotation = s * 90;
+    return {
+      position: 'absolute' as const,
+      left: origin.x + offset.x - 6,
+      top: origin.y + offset.y - 6,
+      width: 12,
+      height: 12,
+      opacity: s,
+      transform: [{ scale: s }, { rotate: `${rotation}deg` }],
+    };
+  });
+
+  return (
+    <Animated.View style={style}>
+      <View style={sparkleStyles.star}>
+        <View style={sparkleStyles.horizontal} />
+        <View style={sparkleStyles.vertical} />
+      </View>
+    </Animated.View>
+  );
+}
+
+const sparkleStyles = StyleSheet.create({
+  star: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  horizontal: { position: 'absolute', width: 12, height: 2, backgroundColor: '#FFD700', borderRadius: 1 },
+  vertical: { position: 'absolute', width: 2, height: 12, backgroundColor: '#FFD700', borderRadius: 1 },
 });
 
 // ---------------------------------------------------------------------------
@@ -244,57 +456,103 @@ export function MessageBubble({
   const bubbleBg = isOwn ? `${colors.primary}16` : colors.surfaceVariant;
   const bubbleBorder = isOwn ? `${colors.primary}35` : colors.border;
 
-  const translateX = useRef(new Animated.Value(0)).current;
-  const replyIconOpacity = translateX.interpolate({
-    inputRange: [0, 40],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
+  // --- Swipe-to-reply gesture (Reanimated + Gesture Handler) ---
+  const swipeX = useSharedValue(0);
 
-  const springBack = () =>
-    Animated.spring(translateX, { toValue: 0, useNativeDriver: false, tension: 80, friction: 10 }).start();
+  const fireSwipeReply = useCallback(() => {
+    onSwipeReply?.();
+  }, [onSwipeReply]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dx > 8 && Math.abs(g.dy) < 20,
-      onPanResponderMove: (_, g) => {
-        if (g.dx > 0) translateX.setValue(Math.min(g.dx, 80));
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dx > 50) onSwipeReply?.();
-        springBack();
-      },
-      onPanResponderTerminate: () => springBack(),
-    }),
-  ).current;
+  const panGesture = Gesture.Pan()
+    .activeOffsetX(8)
+    .failOffsetY([-20, 20])
+    .onUpdate((e) => {
+      if (e.translationX > 0) {
+        swipeX.value = Math.min(e.translationX, 80);
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationX > 50) {
+        runOnJS(fireSwipeReply)();
+      }
+      swipeX.value = withSpring(0, { damping: 10, stiffness: 80, mass: 1 });
+    });
 
+  const swipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: swipeX.value }],
+  }));
+
+  const replyIconStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(swipeX.value, [0, 40], [0, 1], 'clamp'),
+  }));
+
+  // --- Big emoji detection ---
   const replyQuoteSenderName = replyTo
     ? replyTo.sender_id === currentUserId
       ? 'You'
       : peerName ?? 'Peer'
     : '';
 
-  // Big-emoji mode: single emoji, not deleted, not a reply
   const isBigEmoji =
     msgType === 'text' && !isDeleted && !replyTo && isSingleEmoji(item.body ?? '');
 
-  const emojiRef = useRef<View>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const [burstVisible, setBurstVisible] = useState(false);
-  const [burstOrigin, setBurstOrigin] = useState({ x: 0, y: 0 });
+  // --- Big emoji idle: compound "Breathe & Hover" animation ---
+  const floatY = useSharedValue(0);
+  const wiggleRot = useSharedValue(0);
+  const breatheScale = useSharedValue(1);
 
-  // Idle pulse loop
   useEffect(() => {
     if (!isBigEmoji) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.08, duration: 900, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1.0, duration: 900, useNativeDriver: true }),
-      ]),
+
+    // Float: 0 → -4 → 0, period 2000ms
+    floatY.value = withRepeat(
+      withSequence(
+        withTiming(-4, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1, // infinite
+      true,
     );
-    loop.start();
-    return () => loop.stop();
-  }, [isBigEmoji, pulseAnim]);
+
+    // Wiggle: -2deg → 2deg, period 2400ms
+    wiggleRot.value = withRepeat(
+      withSequence(
+        withTiming(-2, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+        withTiming(2, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+
+    // Breathe: 1.0 → 1.04, period 1600ms
+    breatheScale.value = withRepeat(
+      withSequence(
+        withTiming(1.04, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1.0, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      true,
+    );
+
+    return () => {
+      floatY.value = 0;
+      wiggleRot.value = 0;
+      breatheScale.value = 1;
+    };
+  }, [isBigEmoji]);
+
+  const bigEmojiIdleStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: floatY.value },
+      { rotate: `${wiggleRot.value}deg` },
+      { scale: breatheScale.value },
+    ],
+  }));
+
+  // --- Burst state ---
+  const emojiRef = useRef<View>(null);
+  const [burstVisible, setBurstVisible] = useState(false);
+  const [burstOrigin, setBurstOrigin] = useState({ x: 0, y: 0 });
 
   const handleBigEmojiPress = () => {
     emojiRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
@@ -302,6 +560,23 @@ export function MessageBubble({
       setBurstVisible(true);
     });
   };
+
+  // --- Emoji-only message entrance ---
+  const entranceScale = useSharedValue(isBigEmoji ? 0 : 1);
+  const entranceY = useSharedValue(isBigEmoji ? 30 : 0);
+
+  useEffect(() => {
+    if (!isBigEmoji) return;
+    entranceScale.value = withSpring(1, { damping: 6, stiffness: 150, mass: 0.8 });
+    entranceY.value = withSpring(0, { damping: 8, stiffness: 120, mass: 0.8 });
+  }, [isBigEmoji]);
+
+  const entranceStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: entranceScale.value },
+      { translateY: entranceY.value },
+    ],
+  }));
 
   const renderContent = () => {
     if (isDeleted) {
@@ -404,13 +679,15 @@ export function MessageBubble({
     // Default: text
     if (isBigEmoji) {
       return (
-        <View ref={emojiRef} style={styles.bigEmojiWrap} collapsable={false}>
-          <Pressable onPress={handleBigEmojiPress} hitSlop={12}>
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-              <Text style={styles.bigEmojiText}>{item.body}</Text>
-            </Animated.View>
-          </Pressable>
-        </View>
+        <Animated.View style={entranceStyle}>
+          <View ref={emojiRef} style={styles.bigEmojiWrap} collapsable={false}>
+            <Pressable onPress={handleBigEmojiPress} hitSlop={12}>
+              <Animated.View style={bigEmojiIdleStyle}>
+                <TwemojiSvg emoji={item.body ?? ''} size={72} />
+              </Animated.View>
+            </Pressable>
+          </View>
+        </Animated.View>
       );
     }
     return (
@@ -430,71 +707,74 @@ export function MessageBubble({
       {/* Reply icon revealed as bubble slides right */}
       <Animated.View
         pointerEvents="none"
-        style={{
-          position: 'absolute',
-          left: 4,
-          top: 0,
-          bottom: 0,
-          justifyContent: 'center',
-          opacity: replyIconOpacity,
-          zIndex: 0,
-        }}
+        style={[
+          {
+            position: 'absolute',
+            left: 4,
+            top: 0,
+            bottom: 0,
+            justifyContent: 'center',
+            zIndex: 0,
+          },
+          replyIconStyle,
+        ]}
       >
         <View style={{ backgroundColor: `${colors.primary}20`, borderRadius: 20, padding: 6 }}>
           <Ionicons name="return-up-forward" size={18} color={colors.primary} />
         </View>
       </Animated.View>
 
-      <Animated.View
-        {...panResponder.panHandlers}
-        style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start', transform: [{ translateX }] }]}
-      >
-        <Pressable onLongPress={!isDeleted ? onLongPress : undefined} delayLongPress={350}>
-          <View
-            style={[
-              styles.bubble,
-              isBigEmoji
-                ? styles.bigEmojiBubble
-                : {
-                    backgroundColor: isDeleted ? `${colors.textTertiary}10` : bubbleBg,
-                    borderColor: isDeleted ? colors.border : bubbleBorder,
-                  },
-            ]}
-          >
-            {isPinned && !isDeleted && (
-              <View style={styles.pinBadge}>
-                <Ionicons name="pin" size={10} color={colors.primary} />
-              </View>
-            )}
-            {replyTo && !isDeleted && (
-              <ReplyQuoteBox
-                replyTo={replyTo}
-                senderName={replyQuoteSenderName}
-                onPress={onReplyQuotePress}
-                primaryColor={colors.primary}
-                textColor={colors.textSecondary}
-                surfaceColor={`${colors.primary}0d`}
-              />
-            )}
-            {renderContent()}
+      <GestureDetector gesture={panGesture}>
+        <Animated.View
+          style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }, swipeStyle]}
+        >
+          <Pressable onLongPress={!isDeleted ? onLongPress : undefined} delayLongPress={350}>
+            <View
+              style={[
+                styles.bubble,
+                isBigEmoji
+                  ? styles.bigEmojiBubble
+                  : {
+                      backgroundColor: isDeleted ? `${colors.textTertiary}10` : bubbleBg,
+                      borderColor: isDeleted ? colors.border : bubbleBorder,
+                    },
+              ]}
+            >
+              {isPinned && !isDeleted && (
+                <View style={styles.pinBadge}>
+                  <Ionicons name="pin" size={10} color={colors.primary} />
+                </View>
+              )}
+              {replyTo && !isDeleted && (
+                <ReplyQuoteBox
+                  replyTo={replyTo}
+                  senderName={replyQuoteSenderName}
+                  onPress={onReplyQuotePress}
+                  primaryColor={colors.primary}
+                  textColor={colors.textSecondary}
+                  surfaceColor={`${colors.primary}0d`}
+                />
+              )}
+              {renderContent()}
+            </View>
+          </Pressable>
+          <View style={styles.metaRow}>
+            <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
+            {isOwn && !isDeleted && <StatusIcon status={item.status} />}
           </View>
-        </Pressable>
-        <View style={styles.metaRow}>
-          <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
-          {isOwn && !isDeleted && <StatusIcon status={item.status} />}
-        </View>
-        {hasReactions && (
-          <ReactionPillsRow
-            reactions={reactions!}
-            onReactionPress={onReactionPress}
-            isOwn={isOwn}
-            primaryColor={colors.primary}
-            surfaceColor={colors.surface}
-            borderColor={colors.border}
-            textColor={colors.textSecondary}
-          />
-        )}
-      </Animated.View>
+          {hasReactions && (
+            <ReactionPillsRow
+              reactions={reactions!}
+              onReactionPress={onReactionPress}
+              isOwn={isOwn}
+              primaryColor={colors.primary}
+              surfaceColor={colors.surface}
+              borderColor={colors.border}
+              textColor={colors.textSecondary}
+            />
+          )}
+        </Animated.View>
+      </GestureDetector>
 
       {isBigEmoji && (
         <BurstOverlay
@@ -592,11 +872,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  reactionEmoji: { fontSize: 14 },
   reactionCount: { fontSize: 11, fontWeight: fontWeight.semibold },
   // Big emoji
   bigEmojiBubble: { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 },
   bigEmojiWrap: { alignItems: 'center', justifyContent: 'center', padding: spacing.xs },
-  bigEmojiText: { fontSize: 72, lineHeight: 80 },
-  burstParticle: { position: 'absolute', fontSize: 36 },
 });

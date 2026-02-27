@@ -7,3 +7,11 @@ export function isSingleEmoji(text: string): boolean {
   if (!t || t.length > 20) return false; // fast-path: plain text never >20 chars
   return SINGLE_EMOJI_RE.test(t);
 }
+
+/** Convert an emoji string to its Twemoji codepoint key (e.g. '👍' → '1f44d'). */
+export function emojiToCodepoint(emoji: string): string {
+  return [...emoji]
+    .map((c) => c.codePointAt(0)!.toString(16))
+    .filter((cp) => cp !== 'fe0f') // strip variation selector
+    .join('-');
+}

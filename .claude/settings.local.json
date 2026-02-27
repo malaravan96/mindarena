@@ -20,7 +20,9 @@
       "Bash(export ANDROID_HOME=\"$LOCALAPPDATA/Android/Sdk\")",
       "Bash(echo \"$LOCALAPPDATA\")",
       "Bash(export ANDROID_HOME=\"C:/Users/Malar/AppData/Local/Android/Sdk\")",
-      "Bash(export PATH=\"$ANDROID_HOME/platform-tools:$PATH\")"
+      "Bash(export PATH=\"$ANDROID_HOME/platform-tools:$PATH\")",
+      "Bash(node -e \"console.log\\(require\\(''c:/Users/Malar/Desktop/mindarena-mvp/mindarena/node_modules/expo/package.json''\\).version\\)\")",
+      "Bash(npx tsx scripts/generate-emoji-map.ts)"
     ],
     "deny": [],
     "ask": []
