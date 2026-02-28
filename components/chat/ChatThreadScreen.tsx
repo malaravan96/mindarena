@@ -152,6 +152,7 @@ export function ChatThreadScreen() {
   const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
   const [composerHeight, setComposerHeight] = useState(56);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [callOverlayMinimized, setCallOverlayMinimized] = useState(false);
   const [androidKbHeight, setAndroidKbHeight] = useState(0);
 
@@ -213,8 +214,34 @@ export function ChatThreadScreen() {
     () => [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [messages],
   );
+  const draftKey = useMemo(
+    () => (conversationId ? `chat_draft_${conversationId}` : null),
+    [conversationId],
+  );
 
   const initialScrollDoneRef = useRef(false);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    let mounted = true;
+    setInput('');
+    setShowJumpToLatest(false);
+    getItem(draftKey).then((raw) => {
+      if (!mounted || !raw) return;
+      setInput(raw);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const timer = setTimeout(() => {
+      void setItem(draftKey, input);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [draftKey, input]);
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
@@ -235,7 +262,19 @@ export function ChatThreadScreen() {
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    shouldAutoScrollRef.current = distanceFromBottom < 120;
+    const nearBottom = distanceFromBottom < 120;
+    shouldAutoScrollRef.current = nearBottom;
+    setShowJumpToLatest((prev) => {
+      if (nearBottom && prev) return false;
+      if (!nearBottom && !prev) return true;
+      return prev;
+    });
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+    messageListRef.current?.scrollToEnd({ animated: true });
   }, []);
 
   const clearOutgoingTimer = useCallback(() => {
@@ -1553,6 +1592,27 @@ export function ChatThreadScreen() {
             }
           />
 
+          {showJumpToLatest && sortedMessages.length > 0 && (
+            <Pressable
+              onPress={scrollToLatest}
+              style={[
+                styles.jumpToLatestBtn,
+                {
+                  backgroundColor: colors.primary,
+                  bottom:
+                    composerHeight +
+                    (androidKbHeight > 0 ? spacing.sm : Math.max(insets.bottom, spacing.sm)) +
+                    spacing.sm,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Jump to latest messages"
+            >
+              <Ionicons name="arrow-down" size={16} color="#fff" />
+              <Text style={styles.jumpToLatestText}>Latest</Text>
+            </Pressable>
+          )}
+
           {editingMessage && (
             <View style={[styles.replyBar, { backgroundColor: `${colors.warning}10`, borderTopColor: colors.border, borderLeftColor: colors.warning }]}>
               <View style={styles.replyBarContent}>
@@ -1640,26 +1700,53 @@ export function ChatThreadScreen() {
               />
             )}
 
-            {!isRecording && !input.trim() && !isBlockedState && (
+            {!isRecording && !isBlockedState && (
               <>
-                <Pressable
-                  onPress={() => pickImage(false)}
-                  style={[styles.composerIconBtn, { backgroundColor: `${colors.secondary}10` }]}
-                >
-                  <Ionicons name="image-outline" size={20} color={colors.secondary} />
-                </Pressable>
-                <Pressable
-                  onPress={startRecording}
-                  style={[styles.composerIconBtn, { backgroundColor: `${colors.wrong}10` }]}
-                >
-                  <Ionicons name="mic-outline" size={20} color={colors.wrong} />
-                </Pressable>
-                <Pressable
-                  onPress={() => setShowPollCreator(true)}
-                  style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10` }]}
-                >
-                  <Ionicons name="bar-chart-outline" size={20} color={colors.primary} />
-                </Pressable>
+                {!input.trim() ? (
+                  <>
+                    <Pressable
+                      onPress={() => pickImage(true)}
+                      style={[styles.composerIconBtn, { backgroundColor: `${colors.warning}12` }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open camera"
+                    >
+                      <Ionicons name="camera-outline" size={20} color={colors.warning} />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => pickImage(false)}
+                      style={[styles.composerIconBtn, { backgroundColor: `${colors.secondary}10` }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Send photo from gallery"
+                    >
+                      <Ionicons name="image-outline" size={20} color={colors.secondary} />
+                    </Pressable>
+                    <Pressable
+                      onPress={startRecording}
+                      style={[styles.composerIconBtn, { backgroundColor: `${colors.wrong}10` }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Record voice message"
+                    >
+                      <Ionicons name="mic-outline" size={20} color={colors.wrong} />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setShowPollCreator(true)}
+                      style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10` }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Create poll"
+                    >
+                      <Ionicons name="bar-chart-outline" size={20} color={colors.primary} />
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable
+                    onPress={() => setInput('')}
+                    style={[styles.composerIconBtn, { backgroundColor: `${colors.border}70` }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear message"
+                  >
+                    <Ionicons name="close-outline" size={20} color={colors.textSecondary} />
+                  </Pressable>
+                )}
               </>
             )}
 
@@ -2202,6 +2289,27 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  jumpToLatestBtn: {
+    position: 'absolute',
+    right: spacing.md,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  jumpToLatestText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
   },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
   modalSheet: {

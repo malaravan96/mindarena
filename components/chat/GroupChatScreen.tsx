@@ -42,6 +42,7 @@ import { PollCreatorSheet } from '@/components/chat/PollCreatorSheet';
 import { MessageSearchSheet } from '@/components/chat/MessageSearchSheet';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { setActiveGroupId } from '@/lib/notificationState';
+import { getItem, setItem } from '@/lib/storage';
 
 const TYPING_RESET_MS = 4000;
 
@@ -73,6 +74,8 @@ export function GroupChatScreen() {
   const [forwardingMessage, setForwardingMessage] = useState<GroupMessage | null>(null);
   const [showPollCreator, setShowPollCreator] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(56);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const messageListRef = useRef<FlatList<GroupMessage> | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -86,6 +89,32 @@ export function GroupChatScreen() {
     () => [...messages].sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [messages],
   );
+  const draftKey = useMemo(
+    () => (groupId ? `group_chat_draft_${groupId}` : null),
+    [groupId],
+  );
+
+  useEffect(() => {
+    if (!draftKey) return;
+    let mounted = true;
+    setInput('');
+    setShowJumpToLatest(false);
+    getItem(draftKey).then((raw) => {
+      if (!mounted || !raw) return;
+      setInput(raw);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const timer = setTimeout(() => {
+      void setItem(draftKey, input);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [draftKey, input]);
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
@@ -98,7 +127,19 @@ export function GroupChatScreen() {
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    shouldAutoScrollRef.current = distanceFromBottom < 120;
+    const nearBottom = distanceFromBottom < 120;
+    shouldAutoScrollRef.current = nearBottom;
+    setShowJumpToLatest((prev) => {
+      if (nearBottom && prev) return false;
+      if (!nearBottom && !prev) return true;
+      return prev;
+    });
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+    messageListRef.current?.scrollToEnd({ animated: true });
   }, []);
 
   const loadThread = useCallback(async () => {
@@ -491,6 +532,24 @@ export function GroupChatScreen() {
             }
           />
 
+          {showJumpToLatest && sortedMessages.length > 0 && (
+            <Pressable
+              onPress={scrollToLatest}
+              style={[
+                styles.jumpToLatestBtn,
+                {
+                  backgroundColor: colors.secondary,
+                  bottom: composerHeight + Math.max(insets.bottom, spacing.sm) + spacing.sm,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Jump to latest messages"
+            >
+              <Ionicons name="arrow-down" size={16} color="#fff" />
+              <Text style={styles.jumpToLatestText}>Latest</Text>
+            </Pressable>
+          )}
+
           {editingMessage && (
             <View style={[styles.replyBar, { backgroundColor: `${colors.warning}10`, borderTopColor: colors.border, borderLeftColor: colors.warning }]}>
               <View style={styles.replyBarContent}>
@@ -528,6 +587,7 @@ export function GroupChatScreen() {
                 paddingBottom: Math.max(insets.bottom, spacing.sm),
               },
             ]}
+            onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
           >
             <Pressable
               onPress={() => setShowEmojiPicker(true)}
@@ -560,6 +620,16 @@ export function GroupChatScreen() {
                 style={[styles.composerIconBtn, { backgroundColor: `${colors.primary}10` }]}
               >
                 <Ionicons name="bar-chart-outline" size={20} color={colors.primary} />
+              </Pressable>
+            )}
+            {!!input.trim() && (
+              <Pressable
+                onPress={() => setInput('')}
+                style={[styles.composerIconBtn, { backgroundColor: `${colors.border}70` }]}
+                accessibilityRole="button"
+                accessibilityLabel="Clear message"
+              >
+                <Ionicons name="close-outline" size={20} color={colors.textSecondary} />
               </Pressable>
             )}
             <Pressable
@@ -768,6 +838,27 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  jumpToLatestBtn: {
+    position: 'absolute',
+    right: spacing.md,
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  jumpToLatestText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.bold,
   },
   systemRow: { alignItems: 'center', paddingVertical: 4 },
   replyBar: {
