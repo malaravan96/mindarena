@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
@@ -92,6 +93,12 @@ const QUICK_REACTIONS = ['🔥', '😂', '👏', '😮', '😈'];
 
 export default function PvpScreen() {
   const { colors } = useTheme();
+  const { challengePlayerId, challengePlayerName } = useLocalSearchParams<{
+    challengePlayerId?: string | string[];
+    challengePlayerName?: string | string[];
+  }>();
+  const preselectedPlayerId = Array.isArray(challengePlayerId) ? challengePlayerId[0] : challengePlayerId;
+  const preselectedPlayerName = Array.isArray(challengePlayerName) ? challengePlayerName[0] : challengePlayerName;
 
   // Auth
   const [userId, setUserId] = useState<string | null>(null);
@@ -111,6 +118,8 @@ export default function PvpScreen() {
   const [connectionMap, setConnectionMap] = useState<Map<string, UserConnection>>(new Map());
   const [incomingRequests, setIncomingRequests] = useState<(UserConnection & { peer_name: string; peer_avatar_url?: string | null })[]>([]);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
+  const [autoChallengeMessage, setAutoChallengeMessage] = useState<string | null>(null);
 
   // Player search
   const [playerSearch, setPlayerSearch] = useState('');
@@ -166,6 +175,7 @@ export default function PvpScreen() {
   const callInitPromiseRef = useRef<Promise<PvpWebRTCCall | null> | null>(null);
   const callSessionIdRef = useRef<string | null>(null);
   const phaseRef = useRef<Phase>('lobby');
+  const autoChallengeAttemptRef = useRef<string | null>(null);
   const mySubmittedRef = useRef(false);
   const oppSubmittedRef = useRef(false);
   const myRevealRef = useRef<typeof myReveal>(null);
@@ -210,7 +220,7 @@ export default function PvpScreen() {
         // Join presence + invite channels once we have uid
         joinLobbyPresence(uid, profile?.username ?? 'Player');
         joinInviteChannel(uid);
-        fetchConnectionData(uid);
+        await fetchConnectionData(uid);
 
         // Listen for connection changes in realtime
         const connChannel = supabase
@@ -218,7 +228,7 @@ export default function PvpScreen() {
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'user_connections' },
-            () => { fetchConnectionData(uid); },
+            () => { void fetchConnectionData(uid); },
           )
           .subscribe();
         connectionsChannelRef.current = connChannel;
@@ -275,6 +285,56 @@ export default function PvpScreen() {
       return undefined;
     }, [opponentId, userId]),
   );
+
+  useEffect(() => {
+    if (!preselectedPlayerId) return;
+    if (autoChallengeAttemptRef.current === preselectedPlayerId) return;
+    if (phase !== 'lobby' || !userId || loadingPlayers || !connectionsLoaded) return;
+
+    autoChallengeAttemptRef.current = preselectedPlayerId;
+
+    if (preselectedPlayerId === userId) {
+      setAutoChallengeMessage('You cannot challenge yourself.');
+      return;
+    }
+
+    const player = players.find((entry) => entry.id === preselectedPlayerId);
+    if (!player) {
+      const fallbackName = preselectedPlayerName || 'That player';
+      setAutoChallengeMessage(`${fallbackName} is not available in your PvP list.`);
+      return;
+    }
+
+    const playerName = player.display_name || player.username || 'This player';
+    if (blockedIds.has(player.id)) {
+      setAutoChallengeMessage(`${playerName} cannot be challenged because one of you has blocked the other.`);
+      return;
+    }
+
+    const connection = connectionMap.get(player.id);
+    if (connection?.status !== 'accepted') {
+      setAutoChallengeMessage(`Connect with ${playerName} first, then send the challenge.`);
+      return;
+    }
+
+    if (!player.online) {
+      setAutoChallengeMessage(`${playerName} is currently offline.`);
+      return;
+    }
+
+    setAutoChallengeMessage(`Sending challenge to ${playerName}...`);
+    sendInvite(player);
+  }, [
+    blockedIds,
+    connectionMap,
+    connectionsLoaded,
+    loadingPlayers,
+    phase,
+    players,
+    preselectedPlayerId,
+    preselectedPlayerName,
+    userId,
+  ]);
 
   // ── Data Loading ────────────────────────────────────────────────
 
@@ -336,6 +396,7 @@ export default function PvpScreen() {
       setIncomingRequests(incoming);
       setBlockedIds(blocked);
     } catch { /* ignore */ }
+    finally { setConnectionsLoaded(true); }
   }
 
   async function refreshCurrentProfile() {
@@ -1369,6 +1430,19 @@ export default function PvpScreen() {
               </View>
             </LinearGradient>
 
+            {autoChallengeMessage && (
+              <Card style={styles.card} padding="md">
+                <Text
+                  style={[
+                    styles.autoChallengeText,
+                    { color: autoChallengeMessage.startsWith('Sending challenge') ? colors.primary : colors.textSecondary },
+                  ]}
+                >
+                  {autoChallengeMessage}
+                </Text>
+              </Card>
+            )}
+
             <Card style={styles.card} padding="lg">
               <Text style={[styles.statsTitle, { color: colors.text }]}>Record</Text>
               <View style={styles.statsRow}>
@@ -2158,6 +2232,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     paddingVertical: spacing.sm,
   },
+  autoChallengeText: { fontSize: fontSize.sm, textAlign: 'center', fontWeight: fontWeight.medium },
   emptyText: { fontSize: fontSize.sm, textAlign: 'center' },
 
   playerRow: {

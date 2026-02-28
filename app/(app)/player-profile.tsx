@@ -143,7 +143,11 @@ export default function PlayerProfile() {
             <Button title="Connect" onPress={handleConnect} variant="gradient" style={{ flex: 1 }} />
             <Button
               title="Challenge"
-              onPress={() => showAlert('Coming soon', 'Duel challenges will be available soon!')}
+              onPress={() => {
+                if (!id) return;
+                const targetName = player?.display_name || player?.username || 'Player';
+                router.push({ pathname: '/pvp', params: { challengePlayerId: id, challengePlayerName: targetName } });
+              }}
               variant="outline"
               style={{ flex: 1 }}
             />
