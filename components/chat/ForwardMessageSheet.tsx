@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: fontSize.md,
+    fontSize: fontSize.base,
     fontWeight: fontWeight.bold,
   },
   closeBtn: { padding: 4 },

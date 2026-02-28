@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -9,8 +9,10 @@ import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { AUTH_CORAL } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
+import { formatCooldown, useResendCooldown } from '@/hooks/useResendCooldown';
 
 const OTP_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function VerifyEmail() {
   const router = useRouter();
@@ -20,6 +22,7 @@ export default function VerifyEmail() {
   const [error, setError] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpRefs = useRef<(TextInput | null)[]>([]);
+  const { canResend, secondsLeft, startCooldown } = useResendCooldown(RESEND_COOLDOWN_SECONDS);
 
   useEffect(() => {
     if (!email) loadUserEmail();
@@ -66,6 +69,8 @@ export default function VerifyEmail() {
   }
 
   async function resendVerification() {
+    if (!canResend) return;
+
     if (!email) {
       showAlert('Error', 'No email found. Please sign in again.');
       return;
@@ -78,6 +83,7 @@ export default function VerifyEmail() {
     try {
       const { error } = await supabase.auth.resend({ type: 'signup', email });
       if (error) throw error;
+      startCooldown();
       showAlert('Code Sent!', 'We sent a new verification code to your email.');
     } catch (e: any) {
       setError(e?.message || 'Failed to resend verification code.');
@@ -117,6 +123,8 @@ export default function VerifyEmail() {
       setOtp(newOtp);
     }
   }
+  const resendDisabled = loading || !canResend;
+  const resendLabel = canResend ? 'Resend' : `Resend in ${formatCooldown(secondsLeft)}`;
 
   return (
     <AuthWaveLayout
@@ -161,12 +169,17 @@ export default function VerifyEmail() {
       <AnimatedItem delay={210}>
         <View style={styles.resendRow}>
           <Text style={styles.resendText}>Didn't receive the code?</Text>
-          <Text
-            onPress={!loading ? resendVerification : undefined}
-            style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+          <Pressable
+            onPress={resendDisabled ? undefined : resendVerification}
+            accessibilityRole="button"
+            accessibilityLabel={resendLabel}
+            accessibilityState={{ disabled: resendDisabled }}
+            hitSlop={8}
           >
-            Resend
-          </Text>
+            <Text style={[styles.resendLink, { color: resendDisabled ? '#888888' : AUTH_CORAL }]}>
+              {resendLabel}
+            </Text>
+          </Pressable>
         </View>
 
         <Button

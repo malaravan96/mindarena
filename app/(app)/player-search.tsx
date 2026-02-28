@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -24,23 +24,44 @@ export default function PlayerSearch() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
-  async function handleSearch(text: string) {
-    setQuery(text);
-    if (text.trim().length < 2) {
+  useEffect(() => {
+    let active = true;
+    const text = query.trim();
+
+    if (text.length < 2) {
       setResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      const data = await searchPlayers(text);
-      setResults(data as PlayerResult[]);
-    } catch (e) {
-      console.error('Search error:', e);
-    } finally {
       setSearching(false);
+      setSearchError('');
+      return () => {
+        active = false;
+      };
     }
-  }
+
+    setSearching(true);
+    setSearchError('');
+    const timer = setTimeout(async () => {
+      try {
+        const data = await searchPlayers(text);
+        if (!active) return;
+        setResults(data as PlayerResult[]);
+      } catch (e) {
+        console.error('Search error:', e);
+        if (active) {
+          setSearchError('Could not search players right now. Please try again.');
+          setResults([]);
+        }
+      } finally {
+        if (active) setSearching(false);
+      }
+    }, 260);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [query]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -55,9 +76,15 @@ export default function PlayerSearch() {
         <Input
           placeholder="Search by username..."
           value={query}
-          onChangeText={handleSearch}
+          onChangeText={setQuery}
           autoCapitalize="none"
           icon="search-outline"
+          clearable
+          helperText={
+            query.trim().length < 2
+              ? 'Type at least 2 characters to search.'
+              : undefined
+          }
         />
       </View>
 
@@ -71,6 +98,10 @@ export default function PlayerSearch() {
             <ActivityIndicator size="small" color={colors.primary} />
           </View>
         )}
+
+        {searchError ? (
+          <Text style={[styles.noResults, { color: colors.error }]}>{searchError}</Text>
+        ) : null}
 
         {results.map((player) => (
           <Pressable

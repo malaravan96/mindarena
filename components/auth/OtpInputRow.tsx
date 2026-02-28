@@ -48,10 +48,17 @@ export function OtpInputRow({
           onChangeText={(text) => onChange(text, index)}
           onKeyPress={({ nativeEvent }) => onKeyPress(nativeEvent.key, index)}
           keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="one-time-code"
+          importantForAutofill="yes"
+          inputMode="numeric"
           maxLength={index === 0 ? otpLength : 1}
           selectTextOnFocus
           editable={!loading}
           autoFocus={autoFocusFirst && index === 0}
+          accessibilityLabel={`Verification code digit ${index + 1} of ${otpLength}`}
+          accessibilityHint={index === 0 ? 'You can paste the full code here' : undefined}
+          accessibilityState={{ disabled: !!loading }}
         />
       ))}
     </View>

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -16,6 +16,7 @@ export default function SignInWithPassword() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const passwordRef = useRef<TextInput | null>(null);
   const [errors, setErrors] = useState<{
     email?: string;
     password?: string;
@@ -103,12 +104,17 @@ export default function SignInWithPassword() {
           error={errors.email}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          clearable
+          onSubmitEditing={() => passwordRef.current?.focus?.()}
           style={styles.inputInner}
         />
       </AnimatedItem>
 
       <AnimatedItem delay={120}>
         <Input
+          ref={passwordRef}
           label="Password"
           value={password}
           onChangeText={(text) => {
@@ -124,6 +130,8 @@ export default function SignInWithPassword() {
           error={errors.password}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="go"
+          onSubmitEditing={handleSignIn}
           style={styles.inputInner}
         />
       </AnimatedItem>
@@ -138,7 +146,7 @@ export default function SignInWithPassword() {
         <Button
           title={loading ? 'Signing In...' : 'Login'}
           onPress={handleSignIn}
-          disabled={loading}
+          disabled={loading || !email.trim() || !password}
           loading={loading}
           variant="primary"
           fullWidth

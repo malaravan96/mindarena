@@ -19,7 +19,7 @@ export async function getItem(key: string): Promise<string | null> {
     }
   }
   if (SecureStore) {
-    return SecureStore.getItemAsync(key);
+    return await SecureStore.getItemAsync(key);
   }
   return null;
 }

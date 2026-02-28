@@ -78,7 +78,7 @@ async function getRandomBytes(length: number) {
   if (typeof Crypto.getRandomBytes === 'function') {
     return Crypto.getRandomBytes(length);
   }
-  return Crypto.getRandomBytesAsync(length);
+  return await Crypto.getRandomBytesAsync(length);
 }
 
 function secureKeyForUser(userId: string) {
@@ -143,7 +143,7 @@ async function ensureLocalKeyPair(userId: string): Promise<LocalKeyPair> {
   if (cached) return cached;
 
   const existingPromise = localKeyPromiseCache.get(userId);
-  if (existingPromise) return existingPromise;
+  if (existingPromise) return await existingPromise;
 
   const createPromise = (async () => {
     const stored = await loadStoredLocalKey(userId);

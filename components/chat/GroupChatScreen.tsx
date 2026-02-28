@@ -177,8 +177,7 @@ export function GroupChatScreen() {
                       : m,
                   ),
                 );
-              })
-              .catch(() => null);
+              }, () => null);
 
             const next = [...prev, msg];
             next.sort((a, b) => a.created_at.localeCompare(b.created_at));

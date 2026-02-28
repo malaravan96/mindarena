@@ -424,7 +424,7 @@ export function ChatThreadScreen() {
         return null;
       }
       if (callRef.current) return callRef.current;
-      if (callInitPromiseRef.current) return callInitPromiseRef.current;
+      if (callInitPromiseRef.current) return await callInitPromiseRef.current;
 
       const initPromise: Promise<DmWebRTCCall | null> = (async () => {
         const client = new DmWebRTCCall({
@@ -734,7 +734,7 @@ export function ChatThreadScreen() {
       const toId = typeof payload.toId === 'string' ? payload.toId : null;
       const currentUserId = userIdRef.current;
       if (toId && currentUserId && toId !== currentUserId) return null;
-      return decodeCallSignalPayload(payload);
+      return await decodeCallSignalPayload(payload);
     };
 
     channel
@@ -1375,22 +1375,6 @@ export function ChatThreadScreen() {
     if (showCallOverlay) setCallOverlayMinimized(false);
   }, [showCallOverlay]);
 
-  if (!conversationId) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.loadingWrap}>
-          <Text style={{ color: colors.textSecondary }}>Conversation not found.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const headerSubtitle = peerIsOnline
-    ? 'Online'
-    : peerLastSeen
-    ? `Last seen ${formatLastSeen(peerLastSeen)}`
-    : 'Direct message';
-
   // Android: KeyboardAvoidingView is broken with New Architecture + edge-to-edge.
   // Track keyboard height manually and apply it as paddingBottom to the body.
   useEffect(() => {
@@ -1406,6 +1390,22 @@ export function ChatThreadScreen() {
       hide.remove();
     };
   }, []);
+
+  if (!conversationId) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingWrap}>
+          <Text style={{ color: colors.textSecondary }}>Conversation not found.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const headerSubtitle = peerIsOnline
+    ? 'Online'
+    : peerLastSeen
+    ? `Last seen ${formatLastSeen(peerLastSeen)}`
+    : 'Direct message';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>

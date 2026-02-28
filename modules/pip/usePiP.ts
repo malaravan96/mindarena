@@ -65,13 +65,13 @@ export function usePiP(handlers?: PiPActionHandler) {
 
   const enterPiP = useCallback(async () => {
     if (Platform.OS === 'android') {
-      return nativeEnterPiP();
+      return await nativeEnterPiP();
     }
     return false;
   }, []);
 
   const exitPiP = useCallback(async () => {
-    return nativeExitPiP();
+    return await nativeExitPiP();
   }, []);
 
   return { isInPiP, supported, enterPiP, exitPiP };

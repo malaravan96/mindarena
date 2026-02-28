@@ -55,6 +55,9 @@ const modeOptions = [
   { key: 'dark' as const, icon: 'moon-outline' as const, label: 'Dark', hint: 'Low light' },
   { key: 'auto' as const, icon: 'phone-portrait-outline' as const, label: 'Auto', hint: 'System sync' },
 ];
+const DISPLAY_NAME_MAX = 50;
+const USERNAME_MAX = 20;
+const BIO_MAX = 160;
 
 export default function Profile() {
   const router = useRouter();
@@ -63,6 +66,11 @@ export default function Profile() {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [initialProfile, setInitialProfile] = useState({
+    displayName: '',
+    username: '',
+    bio: '',
+  });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -127,10 +135,18 @@ export default function Profile() {
         }>();
 
       if (profileData) {
-        setUsername(profileData.username ?? '');
-        setDisplayName(profileData.display_name ?? '');
+        const nextUsername = profileData.username ?? '';
+        const nextDisplayName = profileData.display_name ?? '';
+        const nextBio = profileData.bio ?? '';
+        setUsername(nextUsername);
+        setDisplayName(nextDisplayName);
         setAvatarUrl(profileData.avatar_url ?? null);
-        setBio(profileData.bio ?? '');
+        setBio(nextBio);
+        setInitialProfile({
+          displayName: nextDisplayName,
+          username: nextUsername,
+          bio: nextBio,
+        });
       }
 
       const { data: attemptsData } = await supabase
@@ -264,6 +280,8 @@ export default function Profile() {
 
   async function save() {
     const trimmedName = displayName.trim();
+    const trimmedUsername = username.trim();
+    const trimmedBio = bio.trim();
     if (!trimmedName) {
       showAlert('Invalid name', 'Display name cannot be empty');
       return;
@@ -278,11 +296,16 @@ export default function Profile() {
       const { error } = await supabase.from('profiles').upsert({
         id: uid,
         display_name: trimmedName,
-        username: username.trim() || null,
-        bio: bio.trim() || null,
+        username: trimmedUsername || null,
+        bio: trimmedBio || null,
       });
 
       if (error) throw error;
+      setInitialProfile({
+        displayName: trimmedName,
+        username: trimmedUsername,
+        bio: trimmedBio,
+      });
       showAlert('Success', 'Profile updated successfully!');
     } catch (e: any) {
       showAlert('Save failed', e?.message ?? 'Unknown error');
@@ -339,6 +362,10 @@ export default function Profile() {
   const profileName = displayName || username || 'MindArena Player';
   const completionScore = [displayName.trim(), username.trim(), bio.trim(), avatarUrl].filter(Boolean).length;
   const completion = Math.round((completionScore / 4) * 100);
+  const hasProfileChanges =
+    displayName.trim() !== initialProfile.displayName ||
+    username.trim() !== initialProfile.username ||
+    bio.trim() !== initialProfile.bio;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -485,6 +512,9 @@ export default function Profile() {
                 placeholder="Enter your display name"
                 autoCapitalize="words"
                 editable={!saving}
+                maxLength={DISPLAY_NAME_MAX}
+                showCharacterCount
+                clearable
               />
 
               <Input
@@ -494,6 +524,11 @@ export default function Profile() {
                 placeholder="Choose a username"
                 autoCapitalize="none"
                 editable={!saving}
+                autoCorrect={false}
+                maxLength={USERNAME_MAX}
+                showCharacterCount
+                clearable
+                helperText="Letters, numbers, hyphens, and underscores only"
               />
 
               <Input
@@ -504,13 +539,16 @@ export default function Profile() {
                 multiline
                 numberOfLines={3}
                 editable={!saving}
+                maxLength={BIO_MAX}
+                showCharacterCount
+                helperText="Optional short intro"
                 style={styles.bioInput}
               />
 
               <Button
                 title={saving ? 'Saving...' : 'Save Profile'}
                 onPress={save}
-                disabled={saving}
+                disabled={saving || !displayName.trim() || !hasProfileChanges}
                 loading={saving}
                 variant="gradient"
                 fullWidth

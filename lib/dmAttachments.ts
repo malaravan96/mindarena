@@ -242,7 +242,7 @@ export async function sendFileMessage(
 
 /** Resolve storage paths to signed URLs for a batch of messages. */
 export async function resolveAttachmentUrls(messages: DmMessage[]): Promise<DmMessage[]> {
-  return Promise.all(
+  return await Promise.all(
     messages.map(async (msg) => {
       if (!msg.attachment_url) return msg;
       // Already a full URL (https://...)

@@ -15,6 +15,9 @@ interface ButtonProps {
   size?: ButtonSize;
   style?: ViewStyle;
   fullWidth?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
 }
 
 export function Button({
@@ -26,6 +29,9 @@ export function Button({
   size = 'md',
   style,
   fullWidth = false,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
 }: ButtonProps) {
   const { colors: themeColors } = useTheme();
 
@@ -88,6 +94,7 @@ export function Button({
         {
           paddingVertical: currentSize.paddingVertical,
           paddingHorizontal: currentSize.paddingHorizontal,
+          minHeight: 44,
           backgroundColor: isGradient ? undefined : currentVariant.backgroundColor,
           borderColor: currentVariant.borderColor,
           borderRadius: borderRadius.md,
@@ -98,6 +105,12 @@ export function Button({
         },
         style,
       ]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      hitSlop={6}
+      testID={testID}
     >
       {isGradient && (
         <>

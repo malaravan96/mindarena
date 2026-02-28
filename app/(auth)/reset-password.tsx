@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -21,6 +21,7 @@ export default function ResetPassword() {
     password?: string;
     confirmPassword?: string;
   }>({});
+  const confirmPasswordRef = useRef<TextInput | null>(null);
 
   async function handleUpdatePassword() {
     const newErrors: typeof errors = {};
@@ -80,6 +81,9 @@ export default function ResetPassword() {
           error={errors.password}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => confirmPasswordRef.current?.focus?.()}
           style={styles.inputInner}
         />
         <PasswordStrengthBar password={password} />
@@ -87,6 +91,7 @@ export default function ResetPassword() {
 
       <AnimatedItem delay={140}>
         <Input
+          ref={confirmPasswordRef}
           label="Confirm New Password"
           value={confirmPassword}
           onChangeText={(text) => {
@@ -102,6 +107,8 @@ export default function ResetPassword() {
           error={errors.confirmPassword}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="go"
+          onSubmitEditing={handleUpdatePassword}
           style={styles.inputInner}
         />
       </AnimatedItem>
@@ -110,7 +117,7 @@ export default function ResetPassword() {
         <Button
           title={loading ? 'Updating...' : 'Update Password'}
           onPress={handleUpdatePassword}
-          disabled={loading}
+          disabled={loading || !password || !confirmPassword}
           loading={loading}
           variant="primary"
           fullWidth

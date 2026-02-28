@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -10,8 +10,10 @@ import { AnimatedItem } from '@/components/auth/AnimatedItem';
 import { OtpInputRow } from '@/components/auth/OtpInputRow';
 import { AUTH_CORAL, AUTH_INPUT_BORDER } from '@/constants/authColors';
 import { fontSize, fontWeight, spacing } from '@/constants/theme';
+import { formatCooldown, useResendCooldown } from '@/hooks/useResendCooldown';
 
 const OTP_LENGTH = 6;
+const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function SignIn() {
   const router = useRouter();
@@ -21,6 +23,7 @@ export default function SignIn() {
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpRefs = useRef<(TextInput | null)[]>([]);
+  const { canResend, secondsLeft, startCooldown } = useResendCooldown(RESEND_COOLDOWN_SECONDS);
 
   async function sendOtpCode() {
     const v = email.trim();
@@ -41,6 +44,7 @@ export default function SignIn() {
       const { error: authError } = await supabase.auth.signInWithOtp({ email: v });
       if (authError) throw authError;
       setStep('otp');
+      startCooldown();
       showAlert('Code Sent!', 'We sent a 6-digit verification code to your email.');
     } catch (e: any) {
       setError(e?.message ?? 'Something went wrong. Please try again.');
@@ -113,6 +117,8 @@ export default function SignIn() {
   }
 
   async function handleResendCode() {
+    if (!canResend) return;
+
     setLoading(true);
     setError('');
     setOtp(Array(OTP_LENGTH).fill(''));
@@ -122,6 +128,7 @@ export default function SignIn() {
         email: email.trim(),
       });
       if (authError) throw authError;
+      startCooldown();
       showAlert('Code Resent!', 'A new verification code has been sent to your email.');
     } catch (e: any) {
       setError(e?.message || 'Failed to resend code.');
@@ -135,6 +142,8 @@ export default function SignIn() {
     step === 'email'
       ? 'Play daily. Think sharper. Stay ahead.'
       : `Enter the code sent to ${email}`;
+  const resendDisabled = loading || !canResend;
+  const resendLabel = canResend ? 'Resend' : `Resend in ${formatCooldown(secondsLeft)}`;
 
   return (
     <AuthWaveLayout
@@ -176,6 +185,9 @@ export default function SignIn() {
               error={error}
               editable={!loading}
               focusColor={AUTH_CORAL}
+              clearable
+              returnKeyType="go"
+              onSubmitEditing={sendOtpCode}
               style={styles.inputInner}
             />
           </AnimatedItem>
@@ -184,7 +196,7 @@ export default function SignIn() {
             <Button
               title={loading ? 'Sending...' : 'Send Verification Code'}
               onPress={sendOtpCode}
-              disabled={loading}
+              disabled={loading || !email.trim()}
               loading={loading}
               variant="primary"
               fullWidth
@@ -257,12 +269,17 @@ export default function SignIn() {
           <AnimatedItem delay={210}>
             <View style={styles.resendRow}>
               <Text style={styles.resendText}>No code yet?</Text>
-              <Text
-                onPress={!loading ? handleResendCode : undefined}
-                style={[styles.resendLink, { color: loading ? '#888888' : AUTH_CORAL }]}
+              <Pressable
+                onPress={resendDisabled ? undefined : handleResendCode}
+                accessibilityRole="button"
+                accessibilityLabel={resendLabel}
+                accessibilityState={{ disabled: resendDisabled }}
+                hitSlop={8}
               >
-                Resend
-              </Text>
+                <Text style={[styles.resendLink, { color: resendDisabled ? '#888888' : AUTH_CORAL }]}>
+                  {resendLabel}
+                </Text>
+              </Pressable>
             </View>
           </AnimatedItem>
         </>

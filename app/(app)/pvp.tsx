@@ -488,7 +488,7 @@ export default function PvpScreen() {
     if (Platform.OS === 'web') return null;
     if (callRef.current) return callRef.current;
     if (!matchIdRef.current || !userIdRef.current) return null;
-    if (callInitPromiseRef.current) return callInitPromiseRef.current;
+    if (callInitPromiseRef.current) return await callInitPromiseRef.current;
 
     const initPromise: Promise<PvpWebRTCCall | null> = (async () => {
       const client = new PvpWebRTCCall({

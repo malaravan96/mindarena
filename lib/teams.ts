@@ -47,7 +47,7 @@ export async function getUserTeam(userId: string): Promise<Team | null> {
     .maybeSingle<{ team_id: string }>();
 
   if (!membership) return null;
-  return getTeam(membership.team_id);
+  return await getTeam(membership.team_id);
 }
 
 export async function getTeamMembers(teamId: string): Promise<TeamMember[]> {

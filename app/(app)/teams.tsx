@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,6 +14,9 @@ import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/consta
 import type { Team, TeamInvite } from '@/lib/types';
 
 type Tab = 'my-team' | 'discover' | 'invites';
+const TEAM_NAME_MIN = 3;
+const TEAM_NAME_MAX = 24;
+const TEAM_DESC_MAX = 120;
 
 export default function Teams() {
   const router = useRouter();
@@ -26,6 +29,7 @@ export default function Teams() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Team[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [invites, setInvites] = useState<(TeamInvite & { team?: Team })[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -36,6 +40,43 @@ export default function Teams() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const query = searchQuery.trim();
+
+    if (query.length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      setSearchError('');
+      return () => {
+        active = false;
+      };
+    }
+
+    setSearching(true);
+    setSearchError('');
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchTeams(query);
+        if (!active) return;
+        setSearchResults(results);
+      } catch (e) {
+        console.error('Search error:', e);
+        if (active) {
+          setSearchError('Could not search teams right now. Please try again.');
+          setSearchResults([]);
+        }
+      } finally {
+        if (active) setSearching(false);
+      }
+    }, 260);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
 
   async function loadData() {
     setLoading(true);
@@ -56,6 +97,7 @@ export default function Teams() {
       setInvites(pendingInvites);
     } catch (e) {
       console.error('Teams load error:', e);
+      showAlert('Unable to load teams', 'Pull down to refresh and try again.');
     } finally {
       setLoading(false);
     }
@@ -67,28 +109,21 @@ export default function Teams() {
     setRefreshing(false);
   }
 
-  async function handleSearch(text: string) {
-    setSearchQuery(text);
-    if (text.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      const results = await searchTeams(text);
-      setSearchResults(results);
-    } catch (e) {
-      console.error('Search error:', e);
-    } finally {
-      setSearching(false);
-    }
-  }
-
   async function handleCreateTeam() {
-    if (!newTeamName.trim()) {
-      showAlert('Error', 'Team name is required');
+    const trimmedName = newTeamName.trim();
+    if (!trimmedName) {
+      showAlert('Error', 'Team name is required.');
       return;
     }
+    if (trimmedName.length < TEAM_NAME_MIN) {
+      showAlert('Error', `Team name must be at least ${TEAM_NAME_MIN} characters.`);
+      return;
+    }
+    if (trimmedName.length > TEAM_NAME_MAX) {
+      showAlert('Error', `Team name must be ${TEAM_NAME_MAX} characters or fewer.`);
+      return;
+    }
+
     setCreating(true);
     try {
       const team = await createTeam(newTeamName, newTeamDesc);
@@ -120,6 +155,16 @@ export default function Teams() {
     { key: 'discover', label: 'Discover', icon: 'search-outline' },
     { key: 'invites', label: 'Invites', icon: 'mail-outline' },
   ];
+
+  const trimmedTeamName = useMemo(() => newTeamName.trim(), [newTeamName]);
+  const teamNameError =
+    trimmedTeamName.length > 0 && trimmedTeamName.length < TEAM_NAME_MIN
+      ? `Use at least ${TEAM_NAME_MIN} characters.`
+      : undefined;
+  const canCreateTeam =
+    !creating &&
+    trimmedTeamName.length >= TEAM_NAME_MIN &&
+    trimmedTeamName.length <= TEAM_NAME_MAX;
 
   const displayTeams = searchQuery.trim().length >= 2 ? searchResults : topTeams;
 
@@ -235,6 +280,12 @@ export default function Teams() {
                     onChangeText={setNewTeamName}
                     placeholder="Enter team name"
                     autoCapitalize="words"
+                    autoCorrect={false}
+                    maxLength={TEAM_NAME_MAX}
+                    clearable
+                    showCharacterCount
+                    helperText={`Between ${TEAM_NAME_MIN} and ${TEAM_NAME_MAX} characters`}
+                    error={teamNameError}
                   />
                   <Input
                     label="Description"
@@ -243,6 +294,9 @@ export default function Teams() {
                     placeholder="Describe your team"
                     multiline
                     numberOfLines={3}
+                    maxLength={TEAM_DESC_MAX}
+                    showCharacterCount
+                    helperText="Optional"
                   />
                   <View style={styles.createActions}>
                     <Button
@@ -255,7 +309,7 @@ export default function Teams() {
                       title={creating ? 'Creating...' : 'Create'}
                       onPress={handleCreateTeam}
                       variant="gradient"
-                      disabled={creating}
+                      disabled={!canCreateTeam}
                       loading={creating}
                       style={{ flex: 1 }}
                     />
@@ -271,9 +325,15 @@ export default function Teams() {
                 <Input
                   placeholder="Search teams..."
                   value={searchQuery}
-                  onChangeText={handleSearch}
+                  onChangeText={setSearchQuery}
                   autoCapitalize="none"
                   icon="search-outline"
+                  clearable
+                  helperText={
+                    searchQuery.trim().length < 2
+                      ? 'Type at least 2 characters to search.'
+                      : undefined
+                  }
                 />
               </View>
 
@@ -282,6 +342,10 @@ export default function Teams() {
                   <ActivityIndicator size="small" color={colors.primary} />
                 </View>
               )}
+
+              {searchError ? (
+                <Text style={[styles.noResults, { color: colors.error }]}>{searchError}</Text>
+              ) : null}
 
               {!myTeam && !showCreate && (
                 <Button
@@ -292,6 +356,10 @@ export default function Teams() {
                   style={{ marginBottom: spacing.md }}
                 />
               )}
+
+              <Text style={[styles.discoverSectionTitle, { color: colors.textSecondary }]}>
+                {searchQuery.trim().length >= 2 ? 'Search results' : 'Top teams'}
+              </Text>
 
               {displayTeams.map((team) => (
                 <Pressable
@@ -314,6 +382,12 @@ export default function Teams() {
 
               {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
                 <Text style={[styles.noResults, { color: colors.textSecondary }]}>No teams found</Text>
+              )}
+
+              {searchQuery.trim().length < 2 && topTeams.length === 0 && (
+                <Text style={[styles.noResults, { color: colors.textSecondary }]}>
+                  No teams available yet. Create one to get started.
+                </Text>
               )}
             </>
           )}
@@ -419,6 +493,13 @@ const styles = StyleSheet.create({
   discoverName: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
   discoverMeta: { fontSize: fontSize.xs, marginTop: 2 },
   noResults: { textAlign: 'center', padding: spacing.lg, fontSize: fontSize.base },
+  discoverSectionTitle: {
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
   inviteCard: { marginBottom: spacing.sm },
   inviteTeamName: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
   inviteDesc: { fontSize: fontSize.sm, marginTop: 2, marginBottom: spacing.md },

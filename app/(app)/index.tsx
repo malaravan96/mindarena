@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
   Animated,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -81,6 +82,7 @@ export default function Home() {
   const [userRank, setUserRank] = useState<number | null>(null);
   const [levelInfo, setLevelInfo] = useState({ level: 1, xp: 0, xpForCurrent: 0, xpForNext: 100, progress: 0, title: 'Newcomer' });
   const [dailyClaimed, setDailyClaimed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -219,6 +221,43 @@ export default function Home() {
     }
   }
 
+  async function refreshLiveStats() {
+    if (!puzzle || puzzle.id.startsWith('offline')) return;
+
+    try {
+      const { count } = await supabase
+        .from('attempts')
+        .select('*', { count: 'exact', head: true })
+        .eq('puzzle_id', puzzle.id)
+        .eq('is_correct', true);
+      setSolversCount(count ?? 0);
+
+      if (existingAttempt?.is_correct) {
+        const { count: fasterCount } = await supabase
+          .from('attempts')
+          .select('*', { count: 'exact', head: true })
+          .eq('puzzle_id', puzzle.id)
+          .eq('is_correct', true)
+          .lt('ms_taken', existingAttempt.ms_taken);
+        setUserRank((fasterCount ?? 0) + 1);
+      } else {
+        setUserRank(null);
+      }
+    } catch {
+      // silently fail
+    }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([loadUserInfo(), refreshLiveStats()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
       toValue: 0.985,
@@ -234,7 +273,11 @@ export default function Home() {
   };
 
   async function submit() {
-    if (!puzzle || selected === null || !startedAt) return;
+    if (!puzzle || !startedAt) return;
+    if (selected === null) {
+      showAlert('Select an option', 'Choose an answer before submitting.');
+      return;
+    }
 
     const ms = Date.now() - startedAt;
     const correct = selected === puzzle.answer_index;
@@ -308,6 +351,15 @@ export default function Home() {
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 760 : undefined }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.surface}
+          />
+        )}
       >
         <LinearGradient
           colors={[colors.gradientStart, colors.gradientEnd]}

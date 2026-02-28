@@ -1,6 +1,7 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, Linking, Image, Modal } from 'react-native';
 import Animated, {
+  makeMutable,
   useSharedValue,
   useAnimatedStyle,
   withSpring,
@@ -245,9 +246,9 @@ const BurstOverlay = React.memo(function BurstOverlay({ visible, origin, emoji, 
   // Main emoji squash/stretch
   const mainScale = useSharedValue(1);
   // Particle progress values (0 → 1)
-  const particleProgress = PARTICLE_CONFIGS.map(() => useSharedValue(0));
+  const particleProgress = useMemo(() => PARTICLE_CONFIGS.map(() => makeMutable(0)), []);
   // Sparkle scales
-  const sparkleScales = SPARKLE_OFFSETS.map(() => useSharedValue(0));
+  const sparkleScales = useMemo(() => SPARKLE_OFFSETS.map(() => makeMutable(0)), []);
 
   useEffect(() => {
     if (!visible) return;

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { showAlert } from '@/lib/alert';
@@ -25,6 +25,9 @@ export default function Register() {
     confirmPassword?: string;
     username?: string;
   }>({});
+  const emailRef = useRef<TextInput | null>(null);
+  const passwordRef = useRef<TextInput | null>(null);
+  const confirmPasswordRef = useRef<TextInput | null>(null);
 
   function validateForm() {
     const newErrors: typeof errors = {};
@@ -103,12 +106,19 @@ export default function Register() {
           error={errors.username}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          maxLength={20}
+          showCharacterCount
+          clearable
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => emailRef.current?.focus?.()}
           style={styles.inputInner}
         />
       </AnimatedItem>
 
       <AnimatedItem delay={110}>
         <Input
+          ref={emailRef}
           label="Email Address"
           value={email}
           onChangeText={(text) => {
@@ -123,12 +133,17 @@ export default function Register() {
           error={errors.email}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          clearable
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus?.()}
           style={styles.inputInner}
         />
       </AnimatedItem>
 
       <AnimatedItem delay={160}>
         <Input
+          ref={passwordRef}
           label="Password"
           value={password}
           onChangeText={(text) => {
@@ -144,6 +159,9 @@ export default function Register() {
           error={errors.password}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => confirmPasswordRef.current?.focus?.()}
           style={styles.inputInner}
         />
         <PasswordStrengthBar password={password} />
@@ -151,6 +169,7 @@ export default function Register() {
 
       <AnimatedItem delay={210}>
         <Input
+          ref={confirmPasswordRef}
           label="Confirm Password"
           value={confirmPassword}
           onChangeText={(text) => {
@@ -166,6 +185,8 @@ export default function Register() {
           error={errors.confirmPassword}
           editable={!loading}
           focusColor={AUTH_CORAL}
+          returnKeyType="go"
+          onSubmitEditing={handleRegister}
           style={styles.inputInner}
         />
       </AnimatedItem>
@@ -174,7 +195,7 @@ export default function Register() {
         <Button
           title={loading ? 'Creating Account...' : 'Create Account'}
           onPress={handleRegister}
-          disabled={loading}
+          disabled={loading || !email.trim() || !username.trim() || !password || !confirmPassword}
           loading={loading}
           variant="primary"
           fullWidth
