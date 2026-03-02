@@ -143,7 +143,7 @@ export async function listConversations(userId: string): Promise<DmConversation[
     .select('id, conversation_id, sender_id, body, created_at, message_type')
     .in('conversation_id', conversationIds)
     .order('created_at', { ascending: false })
-    .limit(Math.max(conversationIds.length * 30, 120));
+    .limit(Math.min(Math.max(conversationIds.length * 30, 120), 300));
 
   const msgs = (messages as DmMessage[] | null | undefined) ?? [];
   const lastByConversation = new Map<string, DmMessage>();

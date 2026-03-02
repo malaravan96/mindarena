@@ -20,7 +20,7 @@ export const MASTERY_CATEGORIES: { type: PuzzleType; label: string }[] = [
 export async function getUserMastery(userId: string): Promise<CategoryMastery[]> {
   const { data } = await supabase
     .from('category_mastery')
-    .select('*')
+    .select('id, user_id, category, puzzles_completed, current_level, updated_at')
     .eq('user_id', userId);
 
   return (data ?? []) as CategoryMastery[];
@@ -33,7 +33,7 @@ export async function incrementCategoryProgress(
   // Get or create mastery record
   const { data: existing } = await supabase
     .from('category_mastery')
-    .select('*')
+    .select('id, user_id, category, puzzles_completed, current_level, updated_at')
     .eq('user_id', userId)
     .eq('category', category)
     .maybeSingle<CategoryMastery>();

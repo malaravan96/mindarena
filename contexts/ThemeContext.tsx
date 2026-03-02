@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 import { buildColorPalette, ColorThemeId } from '@/constants/theme';
 import { getItem, setItem } from '@/lib/storage';
@@ -39,23 +39,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  function setTheme(t: Theme) {
+  const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
     setItem(THEME_KEY, t);
-  }
+  }, []);
 
-  function setColorTheme(id: ColorThemeId) {
+  const setColorTheme = useCallback((id: ColorThemeId) => {
     setColorThemeState(id);
     setItem(COLOR_THEME_KEY, id);
-  }
+  }, []);
 
   const colorScheme: ColorScheme = theme === 'auto' ? systemColorScheme || 'light' : theme;
-  const themeColors = buildColorPalette(colorScheme, colorTheme);
+  const themeColors = useMemo(() => buildColorPalette(colorScheme, colorTheme), [colorScheme, colorTheme]);
+
+  const contextValue = useMemo(
+    () => ({ theme, colorScheme, colors: themeColors, colorTheme, setTheme, setColorTheme }),
+    [theme, colorScheme, themeColors, colorTheme, setTheme, setColorTheme],
+  );
 
   return (
-    <ThemeContext.Provider
-      value={{ theme, colorScheme, colors: themeColors, colorTheme, setTheme, setColorTheme }}
-    >
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

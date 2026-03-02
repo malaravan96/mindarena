@@ -17,6 +17,7 @@ const BUCKET = 'dm-attachments';
 const SIGNED_URL_TTL = 3600; // 1 hour
 
 // In-memory signed URL cache: path → { url, expiresAt }
+const MAX_URL_CACHE_SIZE = 200;
 const urlCache = new Map<string, { url: string; expiresAt: number }>();
 
 function ext(mimeType: string): string {
@@ -47,6 +48,19 @@ export async function getDmAttachmentUrl(path: string, expiresIn = SIGNED_URL_TT
     .createSignedUrl(path, expiresIn);
 
   if (error || !data?.signedUrl) throw error ?? new Error('Failed to get signed URL');
+
+  // Evict oldest entry if cache is full
+  if (urlCache.size >= MAX_URL_CACHE_SIZE) {
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [key, val] of urlCache) {
+      if (val.expiresAt < oldestTime) {
+        oldestTime = val.expiresAt;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey) urlCache.delete(oldestKey);
+  }
 
   urlCache.set(path, {
     url: data.signedUrl,

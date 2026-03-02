@@ -4,7 +4,7 @@ import type { AvatarFrame } from '@/lib/types';
 export async function getAllFrames(): Promise<AvatarFrame[]> {
   const { data } = await supabase
     .from('avatar_frames')
-    .select('*')
+    .select('id, name, description, rarity, unlock_level, border_color, border_width')
     .order('unlock_level', { ascending: true });
 
   return (data ?? []) as AvatarFrame[];
@@ -64,7 +64,7 @@ export async function getEquippedFrame(userId: string): Promise<AvatarFrame | nu
 
   const { data: frame } = await supabase
     .from('avatar_frames')
-    .select('*')
+    .select('id, name, description, rarity, unlock_level, border_color, border_width')
     .eq('id', profile.avatar_frame)
     .maybeSingle<AvatarFrame>();
 

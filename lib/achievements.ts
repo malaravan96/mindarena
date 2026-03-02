@@ -10,7 +10,7 @@ export async function getUserAchievements(userId: string): Promise<(UserAchievem
 
   const { data: allBadges } = await supabase
     .from('available_badges')
-    .select('*');
+    .select('id, title, description, icon, rarity, category, criteria, xp_reward, created_at');
 
   const badges = (allBadges ?? []) as AvailableBadge[];
   const badgeMap = new Map(badges.map((b) => [b.id, b]));
@@ -34,7 +34,7 @@ export async function getUserAchievements(userId: string): Promise<(UserAchievem
 export async function getAllBadges(): Promise<AvailableBadge[]> {
   const { data } = await supabase
     .from('available_badges')
-    .select('*')
+    .select('id, title, description, icon, rarity, category, criteria, xp_reward, created_at')
     .order('rarity', { ascending: true });
 
   return (data ?? []) as AvailableBadge[];

@@ -13,7 +13,7 @@ export async function getFriendsFeed(userId: string, limit = 50): Promise<Activi
 
   const { data } = await supabase
     .from('activity_feed')
-    .select('*')
+    .select('id, user_id, event_type, metadata, visibility, created_at')
     .in('user_id', allIds)
     .order('created_at', { ascending: false })
     .limit(limit);

@@ -48,11 +48,11 @@ interface MessageBubbleProps {
   onVoicePress?: (url: string, messageId: string) => void;
   playingVoiceId?: string | null;
   reactions?: DmReactionGroup[];
-  onReactionPress?: (emoji: string) => void;
-  onLongPress?: () => void;
+  onReactionPress?: (messageId: string, emoji: string) => void;
+  onLongPress?: (message: DmMessage) => void;
   replyTo?: DmMessage | null;
-  onReplyQuotePress?: () => void;
-  onSwipeReply?: () => void;
+  onReplyQuotePress?: (replyToId: string) => void;
+  onSwipeReply?: (message: DmMessage) => void;
   peerName?: string;
   currentUserId?: string;
   isPinned?: boolean;
@@ -501,8 +501,20 @@ export const MessageBubble = React.memo(function MessageBubble({
   const swipeX = useSharedValue(0);
 
   const fireSwipeReply = useCallback(() => {
-    onSwipeReply?.();
-  }, [onSwipeReply]);
+    onSwipeReply?.(item);
+  }, [onSwipeReply, item]);
+
+  const handleLongPress = useCallback(() => {
+    onLongPress?.(item);
+  }, [onLongPress, item]);
+
+  const handleReplyQuotePress = useCallback(() => {
+    if (item.reply_to_id) onReplyQuotePress?.(item.reply_to_id);
+  }, [onReplyQuotePress, item.reply_to_id]);
+
+  const handleReactionPress = useCallback((emoji: string) => {
+    onReactionPress?.(item.id, emoji);
+  }, [onReactionPress, item.id]);
 
   const panGesture = Gesture.Pan()
     .activeOffsetX(8)
@@ -850,7 +862,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             swipeStyle,
           ]}
         >
-          <Pressable onLongPress={!isDeleted ? onLongPress : undefined} delayLongPress={350}>
+          <Pressable onLongPress={!isDeleted ? handleLongPress : undefined} delayLongPress={350}>
             <View
               style={[
                 styles.bubble,
@@ -873,7 +885,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 <ReplyQuoteBox
                   replyTo={replyTo}
                   senderName={replyQuoteSenderName}
-                  onPress={onReplyQuotePress}
+                  onPress={handleReplyQuotePress}
                   accentColor={colors.primary}
                   isOwn={isOwn}
                 />
@@ -892,7 +904,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           {hasReactions && (
             <ReactionPillsRow
               reactions={reactions!}
-              onReactionPress={onReactionPress}
+              onReactionPress={handleReactionPress}
               isOwn={isOwn}
               primaryColor={colors.primary}
               surfaceColor={colors.surface}
@@ -914,20 +926,31 @@ export const MessageBubble = React.memo(function MessageBubble({
     </View>
   );
 }, (prev, next) => {
-  return (
-    prev.item.id === next.item.id &&
-    prev.item.body === next.item.body &&
-    prev.item.status === next.item.status &&
-    prev.item.edited_at === next.item.edited_at &&
-    prev.item.is_deleted === next.item.is_deleted &&
-    prev.isOwn === next.isOwn &&
-    prev.isFirstInGroup === next.isFirstInGroup &&
-    prev.isLastInGroup === next.isLastInGroup &&
-    prev.playingVoiceId === next.playingVoiceId &&
-    prev.isPinned === next.isPinned &&
-    prev.reactions === next.reactions &&
-    prev.replyTo === next.replyTo
-  );
+  if (
+    prev.item.id !== next.item.id ||
+    prev.item.body !== next.item.body ||
+    prev.item.status !== next.item.status ||
+    prev.item.edited_at !== next.item.edited_at ||
+    prev.item.is_deleted !== next.item.is_deleted ||
+    prev.isOwn !== next.isOwn ||
+    prev.isFirstInGroup !== next.isFirstInGroup ||
+    prev.isLastInGroup !== next.isLastInGroup ||
+    prev.playingVoiceId !== next.playingVoiceId ||
+    prev.isPinned !== next.isPinned ||
+    prev.replyTo !== next.replyTo
+  ) return false;
+
+  // Deep compare reactions (arrays from Map.get() are always new references)
+  const prevR = prev.reactions;
+  const nextR = next.reactions;
+  if (prevR === nextR) return true;
+  if (!prevR || !nextR || prevR.length !== nextR.length) return false;
+  for (let i = 0; i < prevR.length; i++) {
+    if (prevR[i].emoji !== nextR[i].emoji ||
+        prevR[i].count !== nextR[i].count ||
+        prevR[i].reactedByMe !== nextR[i].reactedByMe) return false;
+  }
+  return true;
 });
 
 // ── Styles ───────────────────────────────────────────────────────

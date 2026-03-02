@@ -55,7 +55,7 @@ export async function getTimedPuzzle(): Promise<Puzzle> {
 export async function getUserBestTimedScores(userId: string): Promise<TimedChallengeSession[]> {
   const { data } = await supabase
     .from('timed_challenge_sessions')
-    .select('*')
+    .select('id, user_id, duration_seconds, puzzles_solved, total_score, started_at, ended_at')
     .eq('user_id', userId)
     .not('ended_at', 'is', null)
     .order('total_score', { ascending: false })

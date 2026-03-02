@@ -302,14 +302,11 @@ export function GroupChatScreen() {
     return () => {
       supabase.removeChannel(channel);
       channelRef.current = null;
+      // Clean up all typing timers when groupId changes or component unmounts
+      for (const timer of typingTimersRef.current.values()) clearTimeout(timer);
+      typingTimersRef.current.clear();
     };
   }, [groupId]);
-
-  useEffect(() => {
-    return () => {
-      for (const timer of typingTimersRef.current.values()) clearTimeout(timer);
-    };
-  }, []);
 
   async function onSend() {
     if (!groupId || sending || !input.trim()) return;
@@ -380,6 +377,27 @@ export function GroupChatScreen() {
     }
   }
 
+  // ── Stable refs for render callback ──
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const sortedMessagesRef = useRef(sortedMessages);
+  sortedMessagesRef.current = sortedMessages;
+
+  const handleGroupLongPress = useCallback((message: DmMessage) => {
+    setActionMenuMessage(message as unknown as GroupMessage);
+  }, []);
+
+  const handleGroupSwipeReply = useCallback((message: DmMessage) => {
+    setReplyTarget(message as unknown as GroupMessage);
+  }, []);
+
+  const handleGroupReplyQuotePress = useCallback((replyToId: string) => {
+    const idx = sortedMessagesRef.current.findIndex((m) => m.id === replyToId);
+    if (idx >= 0) {
+      messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
+    }
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: GroupMessage }) => {
       const isOwn = item.sender_id === userId;
@@ -395,7 +413,7 @@ export function GroupChatScreen() {
       }
 
       const replyTo = item.reply_to_id
-        ? (messages.find((m) => m.id === item.reply_to_id) as DmMessage | undefined) ?? null
+        ? (messagesRef.current.find((m) => m.id === item.reply_to_id) as DmMessage | undefined) ?? null
         : null;
 
       return (
@@ -420,19 +438,14 @@ export function GroupChatScreen() {
             currentUserId={userId ?? undefined}
             isPinned={!!item.pinned_at}
             replyTo={replyTo}
-            onLongPress={() => setActionMenuMessage(item)}
-            onSwipeReply={() => setReplyTarget(item)}
-            onReplyQuotePress={() => {
-              const idx = sortedMessages.findIndex((m) => m.id === item.reply_to_id);
-              if (idx >= 0) {
-                messageListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.3 });
-              }
-            }}
+            onLongPress={handleGroupLongPress}
+            onSwipeReply={handleGroupSwipeReply}
+            onReplyQuotePress={handleGroupReplyQuotePress}
           />
         </View>
       );
     },
-    [userId, colors, messages, sortedMessages],
+    [userId, colors, handleGroupLongPress, handleGroupSwipeReply, handleGroupReplyQuotePress],
   );
 
   const typingLabel = useMemo(() => {
@@ -520,6 +533,11 @@ export function GroupChatScreen() {
             onScroll={onListScroll}
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
+            removeClippedSubviews={Platform.OS !== 'web'}
+            windowSize={11}
+            maxToRenderPerBatch={15}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={20}
             ListEmptyComponent={
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No messages yet. Say hi!</Text>
             }

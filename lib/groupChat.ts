@@ -70,7 +70,7 @@ export async function listGroupConversations(userId: string): Promise<GroupConve
     .select('id, group_id, sender_id, body, message_type, created_at')
     .in('group_id', groupIds)
     .order('created_at', { ascending: false })
-    .limit(groupIds.length * 10);
+    .limit(Math.min(groupIds.length * 10, 200));
 
   const lastByGroup = new Map<string, string>();
   const unreadByGroup = new Map<string, number>();

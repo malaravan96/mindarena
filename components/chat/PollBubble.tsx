@@ -12,7 +12,7 @@ interface PollBubbleProps {
   currentUserId: string | null;
 }
 
-export function PollBubble({ pollId, currentUserId }: PollBubbleProps) {
+export const PollBubble = React.memo(function PollBubble({ pollId, currentUserId }: PollBubbleProps) {
   const { colors } = useTheme();
   const [poll, setPoll] = useState<ChatPoll | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,7 +130,7 @@ export function PollBubble({ pollId, currentUserId }: PollBubbleProps) {
       </Text>
     </View>
   );
-}
+}, (prev, next) => prev.pollId === next.pollId && prev.currentUserId === next.currentUserId);
 
 const styles = StyleSheet.create({
   loadingWrap: { padding: spacing.md, alignItems: 'center' },

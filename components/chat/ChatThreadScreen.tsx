@@ -385,12 +385,48 @@ export function ChatThreadScreen() {
     (messageListRef.current as any)?.scrollToEnd?.({ animated: true });
   }, []);
 
+  // ── Stable refs for render callback (avoid recreating on every message/reaction change) ──
+  const messagesRef = useRef(chatRealtime.messages);
+  messagesRef.current = chatRealtime.messages;
+  const reactionsMapRef = useRef(chatRealtime.reactionsMap);
+  reactionsMapRef.current = chatRealtime.reactionsMap;
+  const sortedMessagesRef = useRef(sortedMessages);
+  sortedMessagesRef.current = sortedMessages;
+
+  // ── Stable callbacks for MessageBubble props ──
+  const handleImagePress = useCallback((url: string) => {
+    router.push({ pathname: '/image-viewer', params: { url } });
+  }, [router]);
+
+  const handleVoicePress = useCallback((_url: string, id: string) => {
+    setPlayingVoiceId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleLongPress = useCallback((message: DmMessage) => {
+    setActionMenuMessage(message);
+  }, []);
+
+  const handleSwipeReply = useCallback((message: DmMessage) => {
+    setReplyTarget(message);
+  }, []);
+
+  const handleReplyQuotePress = useCallback((replyToId: string) => {
+    const idx = sortedMessagesRef.current.findIndex((m) => m.id === replyToId);
+    if (idx >= 0) {
+      (messageListRef.current as any)?.scrollToIndex?.({
+        index: idx,
+        animated: true,
+        viewPosition: 0.3,
+      });
+    }
+  }, []);
+
   // ── Render message item ──
 
   const renderMessageItem = useCallback(
     ({ item, isFirstInGroup, isLastInGroup }: { item: DmMessage; isFirstInGroup: boolean; isLastInGroup: boolean }) => {
       const replyTo = item.reply_to_id
-        ? chatRealtime.messages.find((m) => m.id === item.reply_to_id) ?? null
+        ? messagesRef.current.find((m) => m.id === item.reply_to_id) ?? null
         : null;
       return (
         <MessageBubble
@@ -399,30 +435,21 @@ export function ChatThreadScreen() {
           isFirstInGroup={isFirstInGroup}
           isLastInGroup={isLastInGroup}
           playingVoiceId={playingVoiceId}
-          reactions={chatRealtime.reactionsMap.get(item.id) ?? []}
+          reactions={reactionsMapRef.current.get(item.id) ?? []}
           replyTo={replyTo}
           peerName={peerName}
           currentUserId={userId ?? undefined}
           isPinned={!!item.pinned_at}
-          onImagePress={(url) => router.push({ pathname: '/image-viewer', params: { url } })}
-          onVoicePress={(url, id) => setPlayingVoiceId((prev) => (prev === id ? null : id))}
-          onLongPress={() => setActionMenuMessage(item)}
-          onReactionPress={(emoji) => { void handleReactionSelect(item.id, emoji); }}
-          onSwipeReply={() => setReplyTarget(item)}
-          onReplyQuotePress={() => {
-            const idx = sortedMessages.findIndex((m) => m.id === item.reply_to_id);
-            if (idx >= 0) {
-              (messageListRef.current as any)?.scrollToIndex?.({
-                index: idx,
-                animated: true,
-                viewPosition: 0.3,
-              });
-            }
-          }}
+          onImagePress={handleImagePress}
+          onVoicePress={handleVoicePress}
+          onLongPress={handleLongPress}
+          onReactionPress={handleReactionSelect}
+          onSwipeReply={handleSwipeReply}
+          onReplyQuotePress={handleReplyQuotePress}
         />
       );
     },
-    [userId, playingVoiceId, router, chatRealtime.messages, chatRealtime.reactionsMap, peerName, sortedMessages, handleReactionSelect],
+    [userId, playingVoiceId, peerName, handleImagePress, handleVoicePress, handleLongPress, handleReactionSelect, handleSwipeReply, handleReplyQuotePress],
   );
 
   // ── Render ──

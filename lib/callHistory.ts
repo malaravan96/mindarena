@@ -70,7 +70,7 @@ export async function getCallHistory(
 ): Promise<CallHistoryEntry[]> {
   const { data, error } = await supabase
     .from('call_history')
-    .select('*')
+    .select('id, conversation_id, caller_id, callee_id, mode, status, started_at, ended_at, duration_seconds, created_at')
     .or(`caller_id.eq.${userId},callee_id.eq.${userId}`)
     .order('created_at', { ascending: false })
     .limit(limit);

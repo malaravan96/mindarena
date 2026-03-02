@@ -46,7 +46,7 @@ export async function getPendingCallForCallee(
 ): Promise<PendingDmCall | null> {
   const { data } = await supabase
     .from('pending_dm_calls')
-    .select('*')
+    .select('id, conversation_id, from_id, to_id, from_name, mode, status, created_at, expires_at')
     .eq('conversation_id', conversationId)
     .eq('to_id', toId)
     .eq('status', 'pending')

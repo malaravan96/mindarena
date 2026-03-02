@@ -4,6 +4,7 @@ import {
   View,
   Text,
   Pressable,
+  Platform,
   StyleSheet,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -161,6 +162,11 @@ export function MessageList({
         onContentSizeChange={onContentSizeChange}
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}
+        removeClippedSubviews={Platform.OS !== 'web'}
+        windowSize={11}
+        maxToRenderPerBatch={15}
+        updateCellsBatchingPeriod={50}
+        initialNumToRender={20}
         ListEmptyComponent={
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
             No messages yet. Say hi.

@@ -5,7 +5,7 @@ import type { Tournament, TournamentParticipant, TournamentRound, TournamentAtte
 export async function listTournaments(status?: string): Promise<Tournament[]> {
   let query = supabase
     .from('tournaments')
-    .select('*')
+    .select('id, title, description, type, status, max_participants, participant_count, entry_fee, prize_xp, prize_title, starts_at, ends_at, created_at')
     .order('starts_at', { ascending: true });
 
   if (status) {
@@ -19,7 +19,7 @@ export async function listTournaments(status?: string): Promise<Tournament[]> {
 export async function getTournament(id: string): Promise<Tournament | null> {
   const { data } = await supabase
     .from('tournaments')
-    .select('*')
+    .select('id, title, description, type, status, max_participants, participant_count, entry_fee, prize_xp, prize_title, starts_at, ends_at, created_at')
     .eq('id', id)
     .maybeSingle<Tournament>();
   return data ?? null;
@@ -69,7 +69,7 @@ export async function isRegistered(tournamentId: string, userId: string): Promis
 export async function getTournamentLeaderboard(tournamentId: string): Promise<(TournamentParticipant & { username?: string; display_name?: string })[]> {
   const { data: participants } = await supabase
     .from('tournament_participants')
-    .select('*')
+    .select('id, tournament_id, user_id, total_score, rounds_completed, eliminated, final_rank, joined_at')
     .eq('tournament_id', tournamentId)
     .order('total_score', { ascending: false })
     .limit(100);
@@ -94,7 +94,7 @@ export async function getTournamentLeaderboard(tournamentId: string): Promise<(T
 export async function getTournamentRounds(tournamentId: string): Promise<TournamentRound[]> {
   const { data } = await supabase
     .from('tournament_rounds')
-    .select('*')
+    .select('id, tournament_id, round_number, puzzle_id, starts_at, ends_at, status')
     .eq('tournament_id', tournamentId)
     .order('round_number', { ascending: true });
 
@@ -150,7 +150,7 @@ export async function submitTournamentAttempt(
 export async function getActiveTournament(): Promise<Tournament | null> {
   const { data } = await supabase
     .from('tournaments')
-    .select('*')
+    .select('id, title, description, type, status, max_participants, participant_count, entry_fee, prize_xp, prize_title, starts_at, ends_at, created_at')
     .eq('status', 'active')
     .order('starts_at', { ascending: true })
     .limit(1)

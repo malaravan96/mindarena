@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getCurrentUserId, getTotalDmUnread, listConversations } from '@/lib/dm';
@@ -196,8 +196,11 @@ export function GlobalNotificationsProvider({ children }: { children: React.Reac
       if (!mounted) return;
       conversationsRef.current = convs;
 
-      // Subscribe to call channels for all existing conversations
-      for (const conv of convs) {
+      // Subscribe to call channels for the 5 most recent conversations only (lazy strategy)
+      const recentConvs = [...convs]
+        .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''))
+        .slice(0, 5);
+      for (const conv of recentConvs) {
         const peerId = conv.user_a === uid ? conv.user_b : conv.user_a;
         subscribeToCallChannel(conv.id, uid, peerId);
       }
@@ -274,21 +277,28 @@ export function GlobalNotificationsProvider({ children }: { children: React.Reac
     };
   }, [subscribeToCallChannel]);
 
+  const contextValue = useMemo(
+    () => ({
+      incomingCall,
+      dismissIncomingCall,
+      acceptIncomingCall,
+      declineIncomingCall,
+      messageToast,
+      dismissMessageToast,
+      totalUnread,
+      refreshUnread,
+      setActiveConversationId,
+      consumePendingIncomingInvite,
+    }),
+    [
+      incomingCall, dismissIncomingCall, acceptIncomingCall, declineIncomingCall,
+      messageToast, dismissMessageToast, totalUnread, refreshUnread,
+      setActiveConversationId, consumePendingIncomingInvite,
+    ],
+  );
+
   return (
-    <GlobalNotificationsContext.Provider
-      value={{
-        incomingCall,
-        dismissIncomingCall,
-        acceptIncomingCall,
-        declineIncomingCall,
-        messageToast,
-        dismissMessageToast,
-        totalUnread,
-        refreshUnread,
-        setActiveConversationId,
-        consumePendingIncomingInvite,
-      }}
-    >
+    <GlobalNotificationsContext.Provider value={contextValue}>
       {children}
     </GlobalNotificationsContext.Provider>
   );

@@ -40,7 +40,7 @@ export async function submitDuelAttempt(
 ): Promise<void> {
   const { data: duel } = await supabase
     .from('puzzle_duels')
-    .select('*')
+    .select('id, challenger_id, opponent_id, puzzle_id, status, challenger_ms, opponent_ms, challenger_correct, opponent_correct, winner_id, created_at')
     .eq('id', duelId)
     .maybeSingle<PuzzleDuel>();
 
@@ -88,7 +88,7 @@ export async function submitDuelAttempt(
 export async function getDuelStatus(duelId: string): Promise<PuzzleDuel | null> {
   const { data } = await supabase
     .from('puzzle_duels')
-    .select('*')
+    .select('id, challenger_id, opponent_id, puzzle_id, status, challenger_ms, opponent_ms, challenger_correct, opponent_correct, winner_id, created_at')
     .eq('id', duelId)
     .maybeSingle<PuzzleDuel>();
 
@@ -98,7 +98,7 @@ export async function getDuelStatus(duelId: string): Promise<PuzzleDuel | null> 
 export async function getPendingDuels(userId: string): Promise<PuzzleDuel[]> {
   const { data } = await supabase
     .from('puzzle_duels')
-    .select('*')
+    .select('id, challenger_id, opponent_id, puzzle_id, status, challenger_ms, opponent_ms, challenger_correct, opponent_correct, winner_id, created_at')
     .eq('opponent_id', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });

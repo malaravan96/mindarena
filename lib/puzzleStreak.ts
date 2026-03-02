@@ -69,7 +69,7 @@ export async function getStreakPuzzle(streakLength: number): Promise<Puzzle> {
 export async function getUserBestStreaks(userId: string): Promise<PuzzleStreakSession[]> {
   const { data } = await supabase
     .from('puzzle_streak_sessions')
-    .select('*')
+    .select('id, user_id, streak_length, max_difficulty_reached, total_score, started_at, ended_at')
     .eq('user_id', userId)
     .not('ended_at', 'is', null)
     .order('streak_length', { ascending: false })

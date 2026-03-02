@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import type { CallUiState } from '@/lib/types';
 
 export type ActiveCallState = {
@@ -61,19 +61,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setActiveCall((prev) => (prev ? { ...prev, isInPiPMode: val } : null));
   }, []);
 
+  const contextValue = useMemo(
+    () => ({
+      activeCall,
+      publishCallState,
+      clearCallState,
+      registerEndCallFn,
+      endCallFromPiP,
+      registerToggleMuteFn,
+      toggleMuteFromPiP,
+      setIsInPiPMode,
+    }),
+    [
+      activeCall, publishCallState, clearCallState, registerEndCallFn,
+      endCallFromPiP, registerToggleMuteFn, toggleMuteFromPiP, setIsInPiPMode,
+    ],
+  );
+
   return (
-    <CallContext.Provider
-      value={{
-        activeCall,
-        publishCallState,
-        clearCallState,
-        registerEndCallFn,
-        endCallFromPiP,
-        registerToggleMuteFn,
-        toggleMuteFromPiP,
-        setIsInPiPMode,
-      }}
-    >
+    <CallContext.Provider value={contextValue}>
       {children}
     </CallContext.Provider>
   );

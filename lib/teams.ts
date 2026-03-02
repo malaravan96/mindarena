@@ -9,7 +9,7 @@ export async function createTeam(name: string, description: string): Promise<Tea
   const { data: team, error } = await supabase
     .from('teams')
     .insert({ name: name.trim(), description: description.trim(), owner_id: uid })
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .maybeSingle<Team>();
 
   if (error) throw error;
@@ -31,7 +31,7 @@ export async function createTeam(name: string, description: string): Promise<Tea
 export async function getTeam(teamId: string): Promise<Team | null> {
   const { data, error } = await supabase
     .from('teams')
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .eq('id', teamId)
     .maybeSingle<Team>();
 
@@ -149,7 +149,7 @@ export async function leaveTeam(teamId: string): Promise<void> {
 export async function searchTeams(query: string): Promise<Team[]> {
   const { data, error } = await supabase
     .from('teams')
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .ilike('name', `%${query}%`)
     .order('total_points', { ascending: false })
     .limit(20);
@@ -161,7 +161,7 @@ export async function searchTeams(query: string): Promise<Team[]> {
 export async function getTopTeams(limit = 50): Promise<Team[]> {
   const { data, error } = await supabase
     .from('teams')
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .order('total_points', { ascending: false })
     .limit(limit);
 
@@ -212,7 +212,7 @@ export async function respondToInvite(inviteId: string, accept: boolean): Promis
 export async function getPendingInvites(userId: string): Promise<(TeamInvite & { team?: Team })[]> {
   const { data: invites, error } = await supabase
     .from('team_invites')
-    .select('*')
+    .select('id, team_id, inviter_id, invitee_id, status, created_at')
     .eq('invitee_id', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
@@ -222,7 +222,7 @@ export async function getPendingInvites(userId: string): Promise<(TeamInvite & {
   const teamIds = [...new Set(invites.map((i: any) => i.team_id))];
   const { data: teams } = await supabase
     .from('teams')
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .in('id', teamIds);
 
   const teamMap = new Map((teams ?? []).map((t: any) => [t.id, t]));

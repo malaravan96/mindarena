@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -125,17 +125,27 @@ const CategoryRow = React.memo(function CategoryRow({ cat, index, visible, color
     transform: [{ translateY: translateY.value }],
   }));
 
+  // Stable ref so individual emoji onPress closures don't change
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  const emojiButtons = useMemo(
+    () =>
+      cat.emojis.map((emoji) => (
+        <AnimatedEmoji
+          key={emoji}
+          emoji={emoji}
+          onPress={() => onSelectRef.current(emoji)}
+        />
+      )),
+    [cat.emojis],
+  );
+
   return (
     <Animated.View style={[styles.category, rowStyle]}>
       <Text style={[styles.catLabel, { color: colors.textSecondary }]}>{cat.label}</Text>
       <View style={styles.emojiGrid}>
-        {cat.emojis.map((emoji) => (
-          <AnimatedEmoji
-            key={emoji}
-            emoji={emoji}
-            onPress={() => onSelect(emoji)}
-          />
-        ))}
+        {emojiButtons}
       </View>
     </Animated.View>
   );
@@ -151,6 +161,21 @@ export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
   const { colors } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [mountedCategories, setMountedCategories] = useState(2);
+
+  // Progressively mount emoji categories to reduce initial render cost
+  useEffect(() => {
+    if (visible && mountedCategories < EMOJI_CATEGORIES.length) {
+      const timer = setTimeout(
+        () => setMountedCategories((n) => Math.min(n + 3, EMOJI_CATEGORIES.length)),
+        100,
+      );
+      return () => clearTimeout(timer);
+    }
+    if (!visible) {
+      setMountedCategories(2);
+    }
+  }, [visible, mountedCategories]);
 
   // Load recent emojis on mount
   useEffect(() => {
@@ -175,11 +200,15 @@ export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
     await SecureStore.setItemAsync(RECENT_STORAGE_KEY, JSON.stringify(updated));
   }, [recentEmojis]);
 
+  // Use ref to stabilize handleSelect so CategoryRow memo isn't broken
+  const saveRecentRef = useRef(saveRecent);
+  saveRecentRef.current = saveRecent;
+
   const handleSelect = useCallback((emoji: string) => {
-    saveRecent(emoji);
+    saveRecentRef.current(emoji);
     onSelect(emoji);
     onClose();
-  }, [saveRecent, onSelect, onClose]);
+  }, [onSelect, onClose]);
 
   // Search filtering
   const filteredResults = useMemo(() => {
@@ -240,8 +269,8 @@ export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
               </View>
             )}
 
-            {/* All categories */}
-            {EMOJI_CATEGORIES.map((cat, i) => (
+            {/* All categories (lazy-mounted for faster open) */}
+            {EMOJI_CATEGORIES.slice(0, mountedCategories).map((cat, i) => (
               <CategoryRow
                 key={cat.label}
                 cat={cat}

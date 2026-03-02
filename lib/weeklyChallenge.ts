@@ -8,7 +8,7 @@ export async function getCurrentWeeklyChallenge(): Promise<WeeklyChallenge | nul
 
   const { data } = await supabase
     .from('weekly_challenges')
-    .select('*')
+    .select('id, week_key, title, description, theme, point_multiplier, starts_at, ends_at')
     .lte('starts_at', now)
     .gte('ends_at', now)
     .maybeSingle<WeeklyChallenge>();
@@ -19,7 +19,7 @@ export async function getCurrentWeeklyChallenge(): Promise<WeeklyChallenge | nul
 export async function getWeeklyChallengeHistory(): Promise<WeeklyChallenge[]> {
   const { data } = await supabase
     .from('weekly_challenges')
-    .select('*')
+    .select('id, week_key, title, description, theme, point_multiplier, starts_at, ends_at')
     .order('starts_at', { ascending: false })
     .limit(10);
 

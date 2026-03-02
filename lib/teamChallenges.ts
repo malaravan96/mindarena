@@ -14,7 +14,7 @@ export async function createTeamChallenge(
       puzzle_id: puzzleId ?? null,
       status: 'pending',
     })
-    .select('*')
+    .select('id, challenger_team_id, opponent_team_id, puzzle_id, status, challenger_score, opponent_score, winner_team_id, created_at')
     .maybeSingle<TeamChallenge>();
 
   if (error || !data) throw error ?? new Error('Failed to create challenge');
@@ -24,7 +24,7 @@ export async function createTeamChallenge(
 export async function getTeamChallenges(teamId: string): Promise<(TeamChallenge & { challenger_team?: Team; opponent_team?: Team })[]> {
   const { data, error } = await supabase
     .from('team_challenges')
-    .select('*')
+    .select('id, challenger_team_id, opponent_team_id, puzzle_id, status, challenger_score, opponent_score, winner_team_id, created_at')
     .or(`challenger_team_id.eq.${teamId},opponent_team_id.eq.${teamId}`)
     .order('created_at', { ascending: false })
     .limit(50);
@@ -37,7 +37,7 @@ export async function getTeamChallenges(teamId: string): Promise<(TeamChallenge 
 
   const { data: teams } = await supabase
     .from('teams')
-    .select('*')
+    .select('id, name, description, avatar_url, owner_id, member_count, total_points, created_at')
     .in('id', teamIds);
 
   const teamMap = new Map((teams ?? []).map((t: any) => [t.id, t]));

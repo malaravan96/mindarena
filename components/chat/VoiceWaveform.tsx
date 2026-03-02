@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  cancelAnimation,
+  Easing,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, fontSize, fontWeight, chatMedia } from '@/constants/theme';
@@ -32,6 +40,30 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Individual bar component using Reanimated (runs on UI thread)
+const WaveformBar = React.memo(function WaveformBar({
+  index,
+  height,
+  barColor,
+  barActiveColor,
+  progress,
+}: {
+  index: number;
+  height: number;
+  barColor: string;
+  barActiveColor: string;
+  progress: SharedValue<number>;
+}) {
+  const animStyle = useAnimatedStyle(() => {
+    const activeIndex = progress.value * chatMedia.voiceWaveformBars;
+    return {
+      backgroundColor: activeIndex > index ? barActiveColor : barColor,
+    };
+  });
+
+  return <Animated.View style={[styles.bar, { height }, animStyle]} />;
+});
+
 export const VoiceWaveform = React.memo(function VoiceWaveform({
   duration,
   isPlaying,
@@ -40,22 +72,23 @@ export const VoiceWaveform = React.memo(function VoiceWaveform({
 }: VoiceWaveformProps) {
   const { colors } = useTheme();
   const bars = useRef(generateBars(chatMedia.voiceWaveformBars, duration)).current;
-  const [progress, setProgress] = useState(0);
-  const progressAnim = useRef(new Animated.Value(0)).current;
+  const [displayTime, setDisplayTime] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Reanimated shared value — animation runs on UI thread
+  const progress = useSharedValue(0);
 
   useEffect(() => {
     if (isPlaying) {
-      setProgress(0);
-      progressAnim.setValue(0);
-      Animated.timing(progressAnim, {
-        toValue: 1,
+      setDisplayTime(0);
+      progress.value = 0;
+      progress.value = withTiming(1, {
         duration: duration * 1000,
-        useNativeDriver: false,
-      }).start();
+        easing: Easing.linear,
+      });
 
       intervalRef.current = setInterval(() => {
-        setProgress((p) => {
+        setDisplayTime((p) => {
           if (p >= duration) {
             if (intervalRef.current) clearInterval(intervalRef.current);
             return duration;
@@ -64,28 +97,23 @@ export const VoiceWaveform = React.memo(function VoiceWaveform({
         });
       }, 1000);
     } else {
-      progressAnim.stopAnimation();
+      cancelAnimation(progress);
+      progress.value = 0;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      setProgress(0);
-      progressAnim.setValue(0);
+      setDisplayTime(0);
     }
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isPlaying, duration, progressAnim]);
+  }, [isPlaying, duration, progress]);
 
   const barColor = isOwn ? 'rgba(255,255,255,0.7)' : colors.primary;
   const barActiveColor = isOwn ? '#fff' : colors.primaryDark;
   const textColor = isOwn ? 'rgba(255,255,255,0.8)' : colors.textSecondary;
-
-  const activeBarCount = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, chatMedia.voiceWaveformBars],
-  });
 
   return (
     <View style={styles.container}>
@@ -99,25 +127,19 @@ export const VoiceWaveform = React.memo(function VoiceWaveform({
 
       <View style={styles.barsContainer}>
         {bars.map((height, i) => (
-          <Animated.View
+          <WaveformBar
             key={i}
-            style={[
-              styles.bar,
-              {
-                height,
-                backgroundColor: activeBarCount.interpolate({
-                  inputRange: [i, i + 0.01],
-                  outputRange: [barColor, barActiveColor],
-                  extrapolate: 'clamp',
-                }),
-              },
-            ]}
+            index={i}
+            height={height}
+            barColor={barColor}
+            barActiveColor={barActiveColor}
+            progress={progress}
           />
         ))}
       </View>
 
       <Text style={[styles.duration, { color: textColor }]}>
-        {isPlaying ? formatDuration(progress) : formatDuration(duration)}
+        {isPlaying ? formatDuration(displayTime) : formatDuration(duration)}
       </Text>
     </View>
   );
