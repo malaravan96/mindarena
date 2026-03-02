@@ -45,6 +45,13 @@ type Props = {
   // PiP
   isInPiPMode?: boolean;
 
+  // Reconnect info
+  reconnectAttempt?: number;
+  maxReconnectAttempts?: number;
+
+  // Timeout countdown (seconds remaining)
+  timeoutCountdown?: number | null;
+
   // Actions
   onAccept: () => void;
   onDecline: () => void;
@@ -52,6 +59,7 @@ type Props = {
   onToggleMute: () => void;
   onToggleCamera: () => void;
   onToggleSpeaker: () => void;
+  onSwitchCamera?: () => void;
 };
 
 const BG_COLOR = '#1a1a2e';
@@ -77,7 +85,11 @@ export function FullScreenCallOverlay({
   onToggleMute,
   onToggleCamera,
   onToggleSpeaker,
+  onSwitchCamera,
   isInPiPMode = false,
+  reconnectAttempt,
+  maxReconnectAttempts,
+  timeoutCountdown,
 }: Props) {
   const insets = useSafeAreaInsets();
   const duration = useCallDurationTimer(callState);
@@ -88,36 +100,34 @@ export function FullScreenCallOverlay({
   const isLive = callState === 'live';
   const isReconnecting = callState === 'reconnecting';
   const isVideoLive = isLive && activeCallMode === 'video';
-  const isAudioLive = isLive && activeCallMode === 'audio';
   const showVideoBackground =
     activeCallMode === 'video' && (isLive || isConnecting || isReconnecting);
 
   const displayName = isIncoming ? incomingInvite!.fromName : peerName;
   const displayMode = isIncoming ? incomingInvite!.mode : (outgoingMode ?? activeCallMode);
 
-  const statusText = isIncoming
-    ? `${displayMode === 'video' ? 'Video' : 'Audio'} Call`
-    : isOutgoing
-      ? 'Calling...'
-      : isConnecting
-        ? 'Connecting...'
-        : isReconnecting
-          ? 'Reconnecting...'
-          : isLive
-            ? duration
-            : '';
+  // Build status text
+  let statusText = '';
+  if (isIncoming) {
+    statusText = `${displayMode === 'video' ? 'Video' : 'Audio'} Call`;
+  } else if (isOutgoing) {
+    statusText = timeoutCountdown != null && timeoutCountdown <= 15
+      ? `Ringing... ${timeoutCountdown}s`
+      : 'Calling...';
+  } else if (isConnecting) {
+    statusText = 'Connecting...';
+  } else if (isReconnecting) {
+    statusText = reconnectAttempt && maxReconnectAttempts
+      ? `Reconnecting... (${reconnectAttempt}/${maxReconnectAttempts})`
+      : 'Reconnecting...';
+  } else if (isLive) {
+    statusText = duration;
+  }
 
-  // ── When in system PiP mode, render only the remote video (no controls/UI) ──
-  // Android captures the Activity content for the PiP window, so we render
-  // a clean full-screen video without any overlays.
+  // ── System PiP mode: minimal video only ──
   if (isInPiPMode && showVideoBackground) {
     return (
-      <Modal
-        visible={visible}
-        animationType="none"
-        transparent={false}
-        statusBarTranslucent
-      >
+      <Modal visible={visible} animationType="none" transparent={false} statusBarTranslucent>
         <View style={styles.root}>
           <RtcVideoView
             streamURL={remoteStreamUrl}
@@ -147,7 +157,6 @@ export function FullScreenCallOverlay({
               style={StyleSheet.absoluteFill}
               emptyLabel=""
             />
-            {/* Gradient overlay for controls readability */}
             <LinearGradient
               colors={['rgba(0,0,0,0.5)', 'transparent', 'transparent', 'rgba(0,0,0,0.7)']}
               locations={[0, 0.25, 0.6, 1]}
@@ -161,6 +170,18 @@ export function FullScreenCallOverlay({
           <Pressable onPress={onMinimize} style={styles.minimizeBtn}>
             <Ionicons name="chevron-down" size={28} color="#fff" />
           </Pressable>
+
+          {isReconnecting && (
+            <View style={styles.reconnectBadge}>
+              <ActivityIndicator size="small" color="#f59e0b" />
+              <Text style={styles.reconnectText}>
+                {reconnectAttempt && maxReconnectAttempts
+                  ? `Attempt ${reconnectAttempt}/${maxReconnectAttempts}`
+                  : 'Reconnecting'}
+              </Text>
+            </View>
+          )}
+
           {opponentMuted && (isLive || isReconnecting) && (
             <View style={styles.peerMutedBadge}>
               <Ionicons name="mic-off" size={14} color="#fbbf24" />
@@ -173,19 +194,11 @@ export function FullScreenCallOverlay({
         <View style={styles.center}>
           {!showVideoBackground && (
             <>
-              {(isIncoming || isOutgoing) ? (
-                <PulsingAvatar
-                  avatarUrl={peerAvatarUrl}
-                  name={displayName}
-                  size={120}
-                />
-              ) : (
-                <PulsingAvatar
-                  avatarUrl={peerAvatarUrl}
-                  name={displayName}
-                  size={100}
-                />
-              )}
+              <PulsingAvatar
+                avatarUrl={peerAvatarUrl}
+                name={displayName}
+                size={isIncoming || isOutgoing ? 120 : 100}
+              />
               <Text style={styles.peerNameText}>{displayName}</Text>
               <Text style={styles.statusText}>{statusText}</Text>
               {isConnecting && (
@@ -211,6 +224,16 @@ export function FullScreenCallOverlay({
               mirror
               emptyLabel={cameraEnabled ? '' : 'Cam off'}
             />
+            {/* Camera switch button */}
+            {onSwitchCamera && cameraEnabled && (
+              <Pressable
+                onPress={onSwitchCamera}
+                style={styles.cameraSwitchBtn}
+                hitSlop={8}
+              >
+                <Ionicons name="camera-reverse" size={18} color="#fff" />
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -256,16 +279,25 @@ export function FullScreenCallOverlay({
                 active={callMuted}
               />
               {activeCallMode === 'video' && (
-                <CallControlButton
-                  icon={cameraEnabled ? 'videocam' : 'videocam-off'}
-                  label={cameraEnabled ? 'Camera' : 'Cam Off'}
-                  onPress={onToggleCamera}
-                  active={!cameraEnabled}
-                />
+                <>
+                  <CallControlButton
+                    icon={cameraEnabled ? 'videocam' : 'videocam-off'}
+                    label={cameraEnabled ? 'Camera' : 'Cam Off'}
+                    onPress={onToggleCamera}
+                    active={!cameraEnabled}
+                  />
+                  {onSwitchCamera && (
+                    <CallControlButton
+                      icon="camera-reverse"
+                      label="Flip"
+                      onPress={onSwitchCamera}
+                    />
+                  )}
+                </>
               )}
               <CallControlButton
                 icon={speakerOn ? 'volume-high' : 'volume-mute'}
-                label={speakerOn ? 'Speaker' : 'Speaker'}
+                label="Speaker"
                 onPress={onToggleSpeaker}
                 active={speakerOn}
               />
@@ -293,6 +325,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     zIndex: 10,
+    gap: 8,
   },
   minimizeBtn: {
     width: 40,
@@ -301,6 +334,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  reconnectBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 'auto',
+    backgroundColor: 'rgba(245,158,11,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  reconnectText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '600',
   },
   peerMutedBadge: {
     flexDirection: 'row',
@@ -337,9 +385,9 @@ const styles = StyleSheet.create({
   pip: {
     position: 'absolute',
     right: 16,
-    width: 120,
-    height: 170,
-    borderRadius: 12,
+    width: 130,
+    height: 180,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.3)',
@@ -349,6 +397,17 @@ const styles = StyleSheet.create({
   pipVideo: {
     width: '100%',
     height: '100%',
+  },
+  cameraSwitchBtn: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   controls: {
     paddingHorizontal: 24,

@@ -303,6 +303,16 @@ export default function ChatScreen() {
     }
   }
 
+  function getMediaPrefix(type?: string | null): string {
+    if (!type || type === 'text') return '';
+    if (type === 'image') return '\uD83D\uDCF7 ';
+    if (type === 'voice') return '\uD83C\uDFA4 ';
+    if (type === 'video') return '\uD83C\uDFA5 ';
+    if (type === 'file') return '\uD83D\uDCCE ';
+    if (type === 'poll') return '\uD83D\uDCCA ';
+    return '';
+  }
+
   function smartFormatTime(iso: string | null | undefined): string {
     if (!iso) return '';
     const date = new Date(iso);
@@ -645,7 +655,7 @@ export default function ChatScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {conv.last_message || '[Encrypted]'}
+                            {getMediaPrefix(conv.last_message_type)}{conv.last_message || '[Encrypted]'}
                           </Text>
                         </View>
                         <View style={styles.rowRight}>
@@ -774,7 +784,7 @@ export default function ChatScreen() {
                             {isMuted && <Ionicons name="volume-mute" size={13} color={colors.textTertiary} />}
                           </View>
                           <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                            {group.last_message || `${group.member_count ?? '?'} members`}
+                            {getMediaPrefix(group.last_message_type)}{group.last_message || `${group.member_count ?? '?'} members`}
                           </Text>
                         </View>
                         <View style={styles.rowRight}>

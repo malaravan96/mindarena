@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Modal, View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,9 +9,15 @@ import Animated, {
   withSequence,
   Easing,
 } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 import { useTheme } from '@/contexts/ThemeContext';
-import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import { borderRadius, fontSize, fontWeight, spacing, chatModal } from '@/constants/theme';
 import { TwemojiSvg } from '@/components/chat/TwemojiSvg';
+import BottomSheet from '@/components/chat/BottomSheet';
+
+const RECENT_STORAGE_KEY = 'emoji_picker_recent';
+const MAX_RECENT = 30;
 
 const EMOJI_CATEGORIES: { label: string; emojis: string[] }[] = [
   {
@@ -47,6 +53,11 @@ const EMOJI_CATEGORIES: { label: string; emojis: string[] }[] = [
     emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉','✡️','🔯','🕎','☯️','☦️','🛐','♈'],
   },
 ];
+
+// Flatten all emojis for search
+const ALL_EMOJIS = EMOJI_CATEGORIES.flatMap((cat) =>
+  cat.emojis.map((emoji) => ({ emoji, category: cat.label })),
+);
 
 interface AnimatedEmojiProps {
   emoji: string;
@@ -93,10 +104,9 @@ interface CategoryRowProps {
   visible: boolean;
   colors: any;
   onSelect: (emoji: string) => void;
-  onClose: () => void;
 }
 
-const CategoryRow = React.memo(function CategoryRow({ cat, index, visible, colors, onSelect, onClose }: CategoryRowProps) {
+const CategoryRow = React.memo(function CategoryRow({ cat, index, visible, colors, onSelect }: CategoryRowProps) {
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(20);
 
@@ -123,7 +133,7 @@ const CategoryRow = React.memo(function CategoryRow({ cat, index, visible, color
           <AnimatedEmoji
             key={emoji}
             emoji={emoji}
-            onPress={() => { onSelect(emoji); onClose(); }}
+            onPress={() => onSelect(emoji)}
           />
         ))}
       </View>
@@ -139,55 +149,132 @@ interface EmojiPickerProps {
 
 export function EmojiPicker({ visible, onSelect, onClose }: EmojiPickerProps) {
   const { colors } = useTheme();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+
+  // Load recent emojis on mount
+  useEffect(() => {
+    if (visible) {
+      SecureStore.getItemAsync(RECENT_STORAGE_KEY).then((val) => {
+        if (val) {
+          try {
+            setRecentEmojis(JSON.parse(val));
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+    } else {
+      setSearchQuery('');
+    }
+  }, [visible]);
+
+  const saveRecent = useCallback(async (emoji: string) => {
+    const updated = [emoji, ...recentEmojis.filter((e) => e !== emoji)].slice(0, MAX_RECENT);
+    setRecentEmojis(updated);
+    await SecureStore.setItemAsync(RECENT_STORAGE_KEY, JSON.stringify(updated));
+  }, [recentEmojis]);
+
+  const handleSelect = useCallback((emoji: string) => {
+    saveRecent(emoji);
+    onSelect(emoji);
+    onClose();
+  }, [saveRecent, onSelect, onClose]);
+
+  // Search filtering
+  const filteredResults = useMemo(() => {
+    if (!searchQuery.trim()) return null;
+    const q = searchQuery.toLowerCase();
+    return ALL_EMOJIS.filter((e) => e.category.toLowerCase().includes(q)).map((e) => e.emoji);
+  }, [searchQuery]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {EMOJI_CATEGORIES.map((cat, i) => (
-            <CategoryRow
-              key={cat.label}
-              cat={cat}
-              index={i}
-              visible={visible}
-              colors={colors}
-              onSelect={onSelect}
-              onClose={onClose}
-            />
-          ))}
-        </ScrollView>
+    <BottomSheet visible={visible} onClose={onClose} title="Emoji">
+      {/* Search bar */}
+      <View style={[styles.searchBar, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
+        <Ionicons name="search" size={16} color={colors.textTertiary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.text }]}
+          placeholder="Search emoji..."
+          placeholderTextColor={colors.textTertiary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+        />
+        {searchQuery.length > 0 && (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
+          </Pressable>
+        )}
       </View>
-    </Modal>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {filteredResults ? (
+          // Search results
+          <View style={styles.category}>
+            <Text style={[styles.catLabel, { color: colors.textSecondary }]}>Search Results</Text>
+            {filteredResults.length > 0 ? (
+              <View style={styles.emojiGrid}>
+                {filteredResults.map((emoji) => (
+                  <AnimatedEmoji key={emoji} emoji={emoji} onPress={() => handleSelect(emoji)} />
+                ))}
+              </View>
+            ) : (
+              <Text style={[styles.emptySearch, { color: colors.textTertiary }]}>
+                No emojis found
+              </Text>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* Recently Used */}
+            {recentEmojis.length > 0 && (
+              <View style={styles.category}>
+                <Text style={[styles.catLabel, { color: colors.textSecondary }]}>Recently Used</Text>
+                <View style={styles.emojiGrid}>
+                  {recentEmojis.map((emoji) => (
+                    <AnimatedEmoji key={`recent-${emoji}`} emoji={emoji} onPress={() => handleSelect(emoji)} />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* All categories */}
+            {EMOJI_CATEGORIES.map((cat, i) => (
+              <CategoryRow
+                key={cat.label}
+                cat={cat}
+                index={i + (recentEmojis.length > 0 ? 1 : 0)}
+                visible={visible}
+                colors={colors}
+                onSelect={handleSelect}
+              />
+            ))}
+          </>
+        )}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    maxHeight: '55%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    paddingTop: spacing.sm,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginHorizontal: spacing.md,
     marginBottom: spacing.sm,
+    gap: spacing.xs,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.sm,
+    padding: 0,
+    margin: 0,
   },
   scrollContent: {
     paddingHorizontal: spacing.md,
@@ -207,9 +294,14 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   emojiBtn: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emptySearch: {
+    textAlign: 'center',
+    paddingVertical: spacing.lg,
+    fontSize: fontSize.sm,
   },
 });

@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   Pressable,
   ScrollView,
   ActivityIndicator,
@@ -12,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import BottomSheet from '@/components/chat/BottomSheet';
 import {
   addGroupMember,
   deleteGroup,
@@ -117,128 +117,104 @@ export function GroupMembersSheet({
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <View style={styles.sheetHeader}>
-          <Text style={[styles.title, { color: colors.text }]}>{groupName}</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            {members.length} member{members.length !== 1 ? 's' : ''}
-          </Text>
-        </View>
+    <BottomSheet visible={visible} onClose={onClose} title={groupName} maxHeight="75%">
+      <View style={styles.sheetHeader}>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          {members.length} member{members.length !== 1 ? 's' : ''}
+        </Text>
+      </View>
 
-        {loading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
-        ) : (
-          <ScrollView showsVerticalScrollIndicator={false} style={styles.memberList}>
-            {members.map((member) => {
-              const name = member.profile?.display_name || member.profile?.username || 'Player';
-              const avatarUrl = member.profile?.avatar_url;
-              const isMe = member.user_id === currentUserId;
+      {loading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.memberList}>
+          {members.map((member) => {
+            const name = member.profile?.display_name || member.profile?.username || 'Player';
+            const avatarUrl = member.profile?.avatar_url;
+            const isMe = member.user_id === currentUserId;
 
-              return (
-                <View key={member.user_id} style={[styles.memberRow, { borderColor: colors.border }]}>
-                  {avatarUrl ? (
-                    <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-                  ) : (
-                    <View style={[styles.avatarFallback, { backgroundColor: `${colors.primary}16` }]}>
-                      <Text style={[styles.avatarText, { color: colors.primary }]}>
-                        {name.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.memberInfo}>
-                    <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
-                      {name} {isMe ? '(you)' : ''}
-                    </Text>
-                    <Text style={[styles.memberRole, { color: colors.textSecondary }]}>
-                      {ROLE_LABEL[member.role]}
+            return (
+              <View key={member.user_id} style={[styles.memberRow, { borderColor: colors.border }]}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatarFallback, { backgroundColor: `${colors.primary}16` }]}>
+                    <Text style={[styles.avatarText, { color: colors.primary }]}>
+                      {name.slice(0, 2).toUpperCase()}
                     </Text>
                   </View>
+                )}
+                <View style={styles.memberInfo}>
+                  <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                    {name} {isMe ? '(you)' : ''}
+                  </Text>
+                  <Text style={[styles.memberRole, { color: colors.textSecondary }]}>
+                    {ROLE_LABEL[member.role]}
+                  </Text>
+                </View>
 
-                  {canManage && !isMe && member.role !== 'owner' && (
-                    <View style={styles.actions}>
-                      {member.role === 'member' && myRole === 'owner' && (
-                        <Pressable
-                          onPress={() => handlePromote(member, 'admin')}
-                          style={[styles.actionBtn, { backgroundColor: `${colors.primary}14` }]}
-                          hitSlop={8}
-                        >
-                          <Ionicons name="arrow-up" size={14} color={colors.primary} />
-                        </Pressable>
-                      )}
-                      {member.role === 'admin' && myRole === 'owner' && (
-                        <Pressable
-                          onPress={() => handlePromote(member, 'member')}
-                          style={[styles.actionBtn, { backgroundColor: `${colors.warning}14` }]}
-                          hitSlop={8}
-                        >
-                          <Ionicons name="arrow-down" size={14} color={colors.warning} />
-                        </Pressable>
-                      )}
+                {canManage && !isMe && member.role !== 'owner' && (
+                  <View style={styles.actions}>
+                    {member.role === 'member' && myRole === 'owner' && (
                       <Pressable
-                        onPress={() => handleRemove(member)}
-                        style={[styles.actionBtn, { backgroundColor: `${colors.wrong}14` }]}
+                        onPress={() => handlePromote(member, 'admin')}
+                        style={[styles.actionBtn, { backgroundColor: `${colors.primary}14` }]}
                         hitSlop={8}
                       >
-                        <Ionicons name="remove-circle-outline" size={14} color={colors.wrong} />
+                        <Ionicons name="arrow-up" size={14} color={colors.primary} />
                       </Pressable>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </ScrollView>
-        )}
+                    )}
+                    {member.role === 'admin' && myRole === 'owner' && (
+                      <Pressable
+                        onPress={() => handlePromote(member, 'member')}
+                        style={[styles.actionBtn, { backgroundColor: `${colors.warning}14` }]}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="arrow-down" size={14} color={colors.warning} />
+                      </Pressable>
+                    )}
+                    <Pressable
+                      onPress={() => handleRemove(member)}
+                      style={[styles.actionBtn, { backgroundColor: `${colors.wrong}14` }]}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="remove-circle-outline" size={14} color={colors.wrong} />
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
 
-        <View style={styles.footer}>
+      <View style={styles.footer}>
+        <Pressable
+          onPress={handleLeave}
+          style={[styles.footerBtn, { backgroundColor: `${colors.warning}14`, borderColor: `${colors.warning}30` }]}
+        >
+          <Ionicons name="exit-outline" size={16} color={colors.warning} />
+          <Text style={[styles.footerBtnText, { color: colors.warning }]}>Leave Group</Text>
+        </Pressable>
+        {myRole === 'owner' && (
           <Pressable
-            onPress={handleLeave}
-            style={[styles.footerBtn, { backgroundColor: `${colors.warning}14`, borderColor: `${colors.warning}30` }]}
+            onPress={handleDelete}
+            style={[styles.footerBtn, { backgroundColor: `${colors.wrong}14`, borderColor: `${colors.wrong}30` }]}
           >
-            <Ionicons name="exit-outline" size={16} color={colors.warning} />
-            <Text style={[styles.footerBtnText, { color: colors.warning }]}>Leave Group</Text>
+            <Ionicons name="trash-outline" size={16} color={colors.wrong} />
+            <Text style={[styles.footerBtnText, { color: colors.wrong }]}>Delete Group</Text>
           </Pressable>
-          {myRole === 'owner' && (
-            <Pressable
-              onPress={handleDelete}
-              style={[styles.footerBtn, { backgroundColor: `${colors.wrong}14`, borderColor: `${colors.wrong}30` }]}
-            >
-              <Ionicons name="trash-outline" size={16} color={colors.wrong} />
-              <Text style={[styles.footerBtnText, { color: colors.wrong }]}>Delete Group</Text>
-            </Pressable>
-          )}
-        </View>
+        )}
       </View>
-    </Modal>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
-  sheet: {
-    maxHeight: '75%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
   sheetHeader: {
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
   },
-  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
   subtitle: { fontSize: fontSize.sm, marginTop: 2 },
   memberList: { paddingHorizontal: spacing.md },
   memberRow: {

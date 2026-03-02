@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Modal, Pressable, FlatList, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import BottomSheet from '@/components/chat/BottomSheet';
 import { getCurrentUserId, listConversations, sendMessage } from '@/lib/dm';
 import { listGroupConversations, sendGroupMessage } from '@/lib/groupChat';
 import { showAlert } from '@/lib/alert';
@@ -105,73 +106,26 @@ export function ForwardMessageSheet({ visible, message, onClose }: ForwardMessag
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <View style={styles.titleRow}>
-          <Ionicons name="arrow-redo-outline" size={16} color={colors.primary} />
-          <Text style={[styles.title, { color: colors.text }]}>Forward to...</Text>
-          <Pressable onPress={onClose} style={styles.closeBtn}>
-            <Ionicons name="close" size={20} color={colors.textSecondary} />
-          </Pressable>
+    <BottomSheet visible={visible} onClose={onClose} title="Forward to..." maxHeight="65%">
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={colors.primary} />
         </View>
-        {loading ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
-        ) : items.length === 0 ? (
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No conversations to forward to.</Text>
-        ) : (
-          <FlatList
-            data={items}
-            keyExtractor={(item) => item.type === 'dm' ? item.conversation.id : item.group.id}
-            renderItem={renderItem}
-            style={styles.list}
-          />
-        )}
-      </View>
-    </Modal>
+      ) : items.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No conversations to forward to.</Text>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.type === 'dm' ? item.conversation.id : item.group.id}
+          renderItem={renderItem}
+          style={styles.list}
+        />
+      )}
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    borderWidth: 1,
-    paddingBottom: spacing.xl,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    maxHeight: '65%',
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  title: {
-    flex: 1,
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
-  closeBtn: { padding: 4 },
   loadingWrap: { paddingVertical: spacing.xl, alignItems: 'center' },
   emptyText: { textAlign: 'center', fontSize: fontSize.sm, paddingVertical: spacing.lg },
   list: { flex: 1 },

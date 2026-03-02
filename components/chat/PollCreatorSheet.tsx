@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   Pressable,
   TextInput,
   ScrollView,
@@ -13,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import BottomSheet from '@/components/chat/BottomSheet';
 import { createPoll } from '@/lib/polls';
 import { showAlert } from '@/lib/alert';
 
@@ -90,124 +90,79 @@ export function PollCreatorSheet({
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <Pressable style={styles.backdrop} onPress={handleClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <View style={styles.titleRow}>
-          <Ionicons name="bar-chart-outline" size={16} color={colors.primary} />
-          <Text style={[styles.title, { color: colors.text }]}>Create Poll</Text>
-          <Pressable onPress={handleClose} style={styles.closeBtn}>
-            <Ionicons name="close" size={20} color={colors.textSecondary} />
-          </Pressable>
-        </View>
+    <BottomSheet visible={visible} onClose={handleClose} title="Create Poll" maxHeight="80%">
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={styles.scrollContent}>
+        <Text style={[styles.label, { color: colors.textSecondary }]}>Question</Text>
+        <TextInput
+          value={question}
+          onChangeText={setQuestion}
+          placeholder="Ask a question..."
+          placeholderTextColor={colors.textTertiary}
+          style={[styles.questionInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+          multiline
+        />
 
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Question</Text>
-          <TextInput
-            value={question}
-            onChangeText={setQuestion}
-            placeholder="Ask a question..."
-            placeholderTextColor={colors.textTertiary}
-            style={[styles.questionInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
-            multiline
-          />
-
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Options</Text>
-          {options.map((opt, i) => (
-            <View key={i} style={styles.optionRow}>
-              <TextInput
-                value={opt}
-                onChangeText={(t) => updateOption(i, t)}
-                placeholder={`Option ${i + 1}`}
-                placeholderTextColor={colors.textTertiary}
-                style={[styles.optionInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
-              />
-              {options.length > 2 && (
-                <Pressable onPress={() => removeOption(i)} style={styles.removeBtn}>
-                  <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
-                </Pressable>
-              )}
-            </View>
-          ))}
-
-          {options.length < 6 && (
-            <Pressable
-              onPress={addOption}
-              style={[styles.addOptionBtn, { borderColor: colors.border }]}
-            >
-              <Ionicons name="add" size={16} color={colors.textSecondary} />
-              <Text style={[styles.addOptionText, { color: colors.textSecondary }]}>Add option</Text>
-            </Pressable>
-          )}
-
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleInfo}>
-              <Text style={[styles.toggleLabel, { color: colors.text }]}>Allow multiple choices</Text>
-              <Text style={[styles.toggleSub, { color: colors.textSecondary }]}>Voters can pick more than one option</Text>
-            </View>
-            <Switch
-              value={isMultipleChoice}
-              onValueChange={setIsMultipleChoice}
-              trackColor={{ false: colors.border, true: `${colors.primary}60` }}
-              thumbColor={isMultipleChoice ? colors.primary : colors.textTertiary}
+        <Text style={[styles.label, { color: colors.textSecondary }]}>Options</Text>
+        {options.map((opt, i) => (
+          <View key={i} style={styles.optionRow}>
+            <TextInput
+              value={opt}
+              onChangeText={(t) => updateOption(i, t)}
+              placeholder={`Option ${i + 1}`}
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.optionInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
             />
+            {options.length > 2 && (
+              <Pressable onPress={() => removeOption(i)} style={styles.removeBtn}>
+                <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+              </Pressable>
+            )}
           </View>
-        </ScrollView>
+        ))}
 
-        <Pressable
-          onPress={handleCreate}
-          disabled={creating}
-          style={[styles.createBtn, { backgroundColor: creating ? colors.border : colors.primary }]}
-        >
-          {creating ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.createBtnText}>Create Poll</Text>
-          )}
-        </Pressable>
-      </View>
-    </Modal>
+        {options.length < 6 && (
+          <Pressable
+            onPress={addOption}
+            style={[styles.addOptionBtn, { borderColor: colors.border }]}
+          >
+            <Ionicons name="add" size={16} color={colors.textSecondary} />
+            <Text style={[styles.addOptionText, { color: colors.textSecondary }]}>Add option</Text>
+          </Pressable>
+        )}
+
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleInfo}>
+            <Text style={[styles.toggleLabel, { color: colors.text }]}>Allow multiple choices</Text>
+            <Text style={[styles.toggleSub, { color: colors.textSecondary }]}>Voters can pick more than one option</Text>
+          </View>
+          <Switch
+            value={isMultipleChoice}
+            onValueChange={setIsMultipleChoice}
+            trackColor={{ false: colors.border, true: `${colors.primary}60` }}
+            thumbColor={isMultipleChoice ? colors.primary : colors.textTertiary}
+          />
+        </View>
+      </ScrollView>
+
+      <Pressable
+        onPress={handleCreate}
+        disabled={creating}
+        style={[styles.createBtn, { backgroundColor: creating ? colors.border : colors.primary }]}
+      >
+        {creating ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Text style={styles.createBtnText}>Create Poll</Text>
+        )}
+      </Pressable>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    borderWidth: 1,
-    paddingBottom: spacing.xl,
+  scrollContent: {
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    maxHeight: '80%',
   },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  title: {
-    flex: 1,
-    fontSize: fontSize.base,
-    fontWeight: fontWeight.bold,
-  },
-  closeBtn: { padding: 4 },
   label: {
     fontSize: fontSize.xs,
     fontWeight: fontWeight.semibold,

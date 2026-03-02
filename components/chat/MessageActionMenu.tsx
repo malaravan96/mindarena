@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import BottomSheet from '@/components/chat/BottomSheet';
 import type { DmMessage, GroupMessage } from '@/lib/types';
 
 type AnyMessage = DmMessage | GroupMessage;
@@ -84,60 +85,24 @@ export function MessageActionMenu({
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <Text style={[styles.title, { color: colors.textSecondary }]}>Message actions</Text>
-        <View style={styles.grid}>
-          {actions.map((action) => (
-            <Pressable
-              key={action.key}
-              onPress={action.onPress}
-              style={[styles.actionItem, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
-            >
-              <Ionicons name={action.icon} size={22} color={action.color ?? colors.primary} />
-              <Text style={[styles.actionLabel, { color: action.color ?? colors.text }]}>{action.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+    <BottomSheet visible={visible} onClose={onClose} title="Message actions">
+      <View style={styles.grid}>
+        {actions.map((action) => (
+          <Pressable
+            key={action.key}
+            onPress={action.onPress}
+            style={[styles.actionItem, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
+          >
+            <Ionicons name={action.icon} size={22} color={action.color ?? colors.primary} />
+            <Text style={[styles.actionLabel, { color: action.color ?? colors.text }]}>{action.label}</Text>
+          </Pressable>
+        ))}
       </View>
-    </Modal>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    borderWidth: 1,
-    paddingBottom: spacing.xl,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
-  title: {
-    fontSize: fontSize.xs,
-    fontWeight: fontWeight.semibold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

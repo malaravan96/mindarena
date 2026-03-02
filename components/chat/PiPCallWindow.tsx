@@ -22,7 +22,6 @@ export function PiPCallWindow() {
   const duration = useCallDurationTimer(activeCall?.callState ?? 'off');
 
   const isOnChatThread = pathname.includes('chat-thread');
-  // Hide if no call, on the chat thread, or if system PiP is active (Android)
   if (!activeCall || isOnChatThread || activeCall.isInPiPMode) return null;
 
   const { conversationId, peerName, peerAvatarUrl, callState, callMode, callMuted, remoteStreamUrl } = activeCall;
@@ -64,6 +63,10 @@ export function PiPCallWindow() {
               style={styles.video}
               emptyLabel=""
             />
+            {/* Peer name overlay on video */}
+            <View style={styles.videoNameOverlay}>
+              <Text style={styles.videoNameText} numberOfLines={1}>{peerName}</Text>
+            </View>
           </View>
         ) : (
           <View style={styles.avatarContainer}>
@@ -82,13 +85,19 @@ export function PiPCallWindow() {
         {/* Info row */}
         <View style={styles.infoRow}>
           <View style={styles.infoText}>
-            <Text style={styles.peerName} numberOfLines={1}>{peerName}</Text>
+            {!isVideoCall && (
+              <Text style={styles.peerName} numberOfLines={1}>{peerName}</Text>
+            )}
             <View style={styles.statusRow}>
               {isLive ? (
                 <View style={styles.liveDot} />
               ) : null}
               <Text style={[styles.statusText, !isLive && styles.statusTextAmber]}>
-                {isLive ? duration : callState === 'connecting' ? 'Connecting...' : 'Reconnecting...'}
+                {isLive
+                  ? duration
+                  : callState === 'connecting'
+                    ? 'Connecting...'
+                    : 'Reconnecting...'}
               </Text>
             </View>
           </View>
@@ -108,6 +117,7 @@ export function PiPCallWindow() {
           style={styles.endButton}
         >
           <Ionicons name="call" size={14} color="#fff" />
+          <Text style={styles.endButtonText}>End</Text>
         </Pressable>
       </Pressable>
     </View>
@@ -117,8 +127,8 @@ export function PiPCallWindow() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    width: 160,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    width: 180,
+    backgroundColor: 'rgba(0,0,0,0.88)',
     borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -127,39 +137,54 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   videoContainer: {
-    width: 160,
-    height: 90,
+    width: 180,
+    height: 120,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#111',
+    position: 'relative',
   },
   video: {
-    width: 160,
-    height: 90,
+    width: 180,
+    height: 120,
+  },
+  videoNameOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  videoNameText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
   avatarContainer: {
-    height: 72,
+    height: 80,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
   },
   avatarFallback: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitials: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
   },
   infoRow: {
@@ -207,12 +232,17 @@ const styles = StyleSheet.create({
   endButton: {
     marginHorizontal: 10,
     marginBottom: 8,
-    height: 28,
+    height: 30,
     backgroundColor: '#ef4444',
-    borderRadius: 14,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 4,
+  },
+  endButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

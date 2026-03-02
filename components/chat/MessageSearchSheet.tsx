@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Modal, Pressable, TextInput, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import BottomSheet from '@/components/chat/BottomSheet';
 import type { DmMessage, GroupMessage } from '@/lib/types';
 
 type AnyMessage = DmMessage | GroupMessage;
@@ -48,113 +49,86 @@ export function MessageSearchSheet({ visible, messages, onClose, onJumpTo }: Mes
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <Pressable style={styles.backdrop} onPress={handleClose} />
-      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        <View style={styles.searchRow}>
-          <View style={[styles.searchInputWrap, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
-            <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search messages..."
-              placeholderTextColor={colors.textTertiary}
-              style={[styles.searchInput, { color: colors.text }]}
-              autoFocus
-              returnKeyType="search"
-            />
-            {query.length > 0 && (
-              <Pressable onPress={() => setQuery('')}>
-                <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
-              </Pressable>
-            )}
-          </View>
-          <Pressable onPress={handleClose} style={styles.cancelBtn}>
-            <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
-          </Pressable>
-        </View>
-
-        {query.trim().length === 0 ? (
-          <View style={styles.hintWrap}>
-            <Ionicons name="search-outline" size={32} color={colors.textTertiary} />
-            <Text style={[styles.hintText, { color: colors.textSecondary }]}>Type to search messages</Text>
-          </View>
-        ) : results.length === 0 ? (
-          <View style={styles.hintWrap}>
-            <Text style={[styles.hintText, { color: colors.textSecondary }]}>No results for "{query}"</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={results}
-            keyExtractor={(item) => item.id}
-            style={styles.list}
-            renderItem={({ item }) => {
-              const bodyText = getBodyText(item);
-              const timeStr = new Date(item.created_at).toLocaleDateString([], {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              });
-              const q = query.toLowerCase();
-              const lower = bodyText.toLowerCase();
-              const idx = lower.indexOf(q);
-
-              return (
-                <Pressable
-                  onPress={() => { handleClose(); onJumpTo(item.id); }}
-                  style={[styles.resultItem, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
-                >
-                  <View style={styles.resultContent}>
-                    {idx >= 0 ? (
-                      <Text style={[styles.resultBody, { color: colors.text }]} numberOfLines={2}>
-                        {bodyText.slice(0, idx)}
-                        <Text style={{ backgroundColor: `${colors.primary}30`, color: colors.primary }}>
-                          {bodyText.slice(idx, idx + q.length)}
-                        </Text>
-                        {bodyText.slice(idx + q.length)}
-                      </Text>
-                    ) : (
-                      <Text style={[styles.resultBody, { color: colors.text }]} numberOfLines={2}>{bodyText}</Text>
-                    )}
-                    <Text style={[styles.resultTime, { color: colors.textTertiary }]}>{timeStr}</Text>
-                  </View>
-                  <Ionicons name="arrow-forward" size={14} color={colors.textSecondary} />
-                </Pressable>
-              );
-            }}
+    <BottomSheet visible={visible} onClose={handleClose} maxHeight="70%">
+      <View style={styles.searchRow}>
+        <View style={[styles.searchInputWrap, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
+          <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search messages..."
+            placeholderTextColor={colors.textTertiary}
+            style={[styles.searchInput, { color: colors.text }]}
+            autoFocus
+            returnKeyType="search"
           />
-        )}
+          {query.length > 0 && (
+            <Pressable onPress={() => setQuery('')}>
+              <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+            </Pressable>
+          )}
+        </View>
+        <Pressable onPress={handleClose} style={styles.cancelBtn}>
+          <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
+        </Pressable>
       </View>
-    </Modal>
+
+      {query.trim().length === 0 ? (
+        <View style={styles.hintWrap}>
+          <Ionicons name="search-outline" size={32} color={colors.textTertiary} />
+          <Text style={[styles.hintText, { color: colors.textSecondary }]}>Type to search messages</Text>
+        </View>
+      ) : results.length === 0 ? (
+        <View style={styles.hintWrap}>
+          <Text style={[styles.hintText, { color: colors.textSecondary }]}>No results for "{query}"</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.id}
+          style={styles.list}
+          renderItem={({ item }) => {
+            const bodyText = getBodyText(item);
+            const timeStr = new Date(item.created_at).toLocaleDateString([], {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+            const q = query.toLowerCase();
+            const lower = bodyText.toLowerCase();
+            const idx = lower.indexOf(q);
+
+            return (
+              <Pressable
+                onPress={() => { handleClose(); onJumpTo(item.id); }}
+                style={[styles.resultItem, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}
+              >
+                <View style={styles.resultContent}>
+                  {idx >= 0 ? (
+                    <Text style={[styles.resultBody, { color: colors.text }]} numberOfLines={2}>
+                      {bodyText.slice(0, idx)}
+                      <Text style={{ backgroundColor: `${colors.primary}30`, color: colors.primary }}>
+                        {bodyText.slice(idx, idx + q.length)}
+                      </Text>
+                      {bodyText.slice(idx + q.length)}
+                    </Text>
+                  ) : (
+                    <Text style={[styles.resultBody, { color: colors.text }]} numberOfLines={2}>{bodyText}</Text>
+                  )}
+                  <Text style={[styles.resultTime, { color: colors.textTertiary }]}>{timeStr}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={14} color={colors.textSecondary} />
+              </Pressable>
+            );
+          }}
+        />
+      )}
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    borderWidth: 1,
-    paddingBottom: spacing.xl,
-    paddingTop: spacing.sm,
-    maxHeight: '70%',
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.sm,
-  },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',

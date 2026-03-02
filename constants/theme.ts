@@ -291,3 +291,34 @@ export const layout = {
   maxWidth: isDesktop ? 1200 : isTablet ? 768 : width,
   contentPadding: isDesktop ? spacing.xxl : isTablet ? spacing.xl : spacing.md,
 };
+
+// ── Chat UI Constants ──────────────────────────────────────────────
+
+export const chatBubble = {
+  radius: 18,
+  tailRadius: 4,
+  maxWidth: Math.min(width * 0.75, 340),
+  groupedMargin: 2,
+  defaultMargin: 8,
+};
+
+export const chatMedia = {
+  imageMaxWidth: Math.min(width * 0.65, 300),
+  imageMinWidth: 150,
+  voiceWaveformBars: 20,
+  voiceBarMaxHeight: 24,
+  voiceBarMinHeight: 3,
+};
+
+export const chatStatus = {
+  iconSize: 16,
+  singleCheck: '\u2713',
+  doubleCheck: '\u2713\u2713',
+};
+
+export const chatModal = {
+  maxHeight: '70%' as const,
+  backdropOpacity: 0.35,
+  handleWidth: 40,
+  handleHeight: 4,
+};

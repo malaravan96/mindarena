@@ -64,6 +64,7 @@ export interface DmConversation {
   peer_is_online?: boolean;
   peer_last_seen_at?: string | null;
   last_message?: string;
+  last_message_type?: DmMessageType;
   unread_count: number;
 }
 
@@ -106,6 +107,20 @@ export interface DmReactionGroup {
   reactedByMe: boolean;
 }
 
+export interface GroupReaction {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+}
+
+export interface GroupReactionGroup {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+}
+
 // ── Group Chat ───────────────────────────────────────────────
 
 export type GroupRole = 'owner' | 'admin' | 'member';
@@ -121,6 +136,7 @@ export interface GroupConversation {
   max_members: number;
   unread_count?: number;
   last_message?: string | null;
+  last_message_type?: string | null;
   member_count?: number;
 }
 
@@ -201,6 +217,31 @@ export interface PvpCallSession {
 }
 
 export type CallUiState = 'off' | 'connecting' | 'live' | 'reconnecting';
+
+export type CallHistoryStatus = 'completed' | 'missed' | 'declined' | 'failed';
+
+export interface CallHistoryEntry {
+  id: string;
+  conversation_id: string;
+  caller_id: string;
+  callee_id: string;
+  mode: 'audio' | 'video';
+  status: CallHistoryStatus;
+  started_at: string;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  created_at: string;
+  peer_name?: string;
+  peer_avatar_url?: string | null;
+}
+
+export interface LinkPreview {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  favicon?: string;
+}
 
 // Connection & block types
 export type ConnectionStatus = 'pending' | 'accepted' | 'declined';

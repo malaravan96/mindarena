@@ -140,7 +140,7 @@ export async function listConversations(userId: string): Promise<DmConversation[
 
   const { data: messages } = await supabase
     .from('dm_messages')
-    .select('id, conversation_id, sender_id, body, created_at')
+    .select('id, conversation_id, sender_id, body, created_at, message_type')
     .in('conversation_id', conversationIds)
     .order('created_at', { ascending: false })
     .limit(Math.max(conversationIds.length * 30, 120));
@@ -201,6 +201,7 @@ export async function listConversations(userId: string): Promise<DmConversation[
         peer_is_online: peer?.is_online ?? false,
         peer_last_seen_at: peer?.last_seen_at ?? null,
         last_message: lastMessage,
+        last_message_type: lastByConversation.get(c.id)?.message_type ?? 'text',
         unread_count: unreadByConversation.get(c.id) ?? 0,
       };
     }),

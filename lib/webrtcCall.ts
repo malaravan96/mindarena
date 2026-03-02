@@ -59,6 +59,7 @@ type DmWebRTCCallCallbacks = {
   onLocalStream?: (stream: AnyMediaStream | null) => void;
   onRemoteStream?: (stream: AnyMediaStream | null) => void;
   onError?: (message: string) => void;
+  onReconnectAttempt?: (attempt: number, maxAttempts: number) => void;
 };
 
 type DmWebRTCCallOptions = {
@@ -70,8 +71,9 @@ type DmWebRTCCallOptions = {
   callbacks: DmWebRTCCallCallbacks;
 };
 
-const RECONNECT_TIMEOUT_MS = 15_000;
 const INITIAL_CONNECT_TIMEOUT_MS = 20_000;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_BASE_DELAY_MS = 2_000; // exponential: 2s, 4s, 8s
 
 export class PvpWebRTCCall {
   private readonly options: WebRTCCallOptions;
@@ -255,7 +257,7 @@ export class PvpWebRTCCall {
       this.reconnectTimer = null;
       this.options.callbacks.onError?.('Voice reconnect timeout');
       this.close(false, 'failed').catch(() => null);
-    }, RECONNECT_TIMEOUT_MS);
+    }, 15_000);
   }
 
   private clearReconnectTimer() {
@@ -281,6 +283,10 @@ export class PvpWebRTCCall {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// DmWebRTCCall — with stability fixes
+// ═══════════════════════════════════════════════════════════════════
+
 export class DmWebRTCCall {
   private readonly options: DmWebRTCCallOptions;
   private pc: any = null;
@@ -293,6 +299,7 @@ export class DmWebRTCCall {
   private videoEnabled = true;
   private pendingCandidates: AnyCandidate[] = [];
   private remoteDescSet = false;
+  private reconnectAttempt = 0;
 
   constructor(options: DmWebRTCCallOptions) {
     this.options = options;
@@ -307,15 +314,33 @@ export class DmWebRTCCall {
     return this.options.mediaMode === 'video';
   }
 
-  async init() {
-    if (this.closed || this.pc) return;
+  get currentReconnectAttempt() {
+    return this.reconnectAttempt;
+  }
+
+  /**
+   * Initialize WebRTC peer connection and media.
+   * Returns `true` if successful, `false` if media access failed.
+   */
+  async init(): Promise<boolean> {
+    if (this.closed || this.pc) return true;
     const WebRTC = getWebRTCModule();
 
-    this.remoteStream = null;
-    this.localStream = await WebRTC.mediaDevices.getUserMedia({
-      audio: true,
-      video: this.options.mediaMode === 'video',
-    });
+    try {
+      this.remoteStream = null;
+      this.localStream = await WebRTC.mediaDevices.getUserMedia({
+        audio: true,
+        video: this.options.mediaMode === 'video',
+      });
+    } catch (err: any) {
+      const msg =
+        err?.message?.includes('permission')
+          ? 'Camera/microphone permission denied. Please enable in Settings.'
+          : `Failed to access media: ${err?.message ?? 'Unknown error'}`;
+      this.options.callbacks.onError?.(msg);
+      return false;
+    }
+
     this.options.callbacks.onLocalStream?.(this.localStream);
     this.pc = new WebRTC.RTCPeerConnection({ iceServers: this.options.iceServers });
 
@@ -354,6 +379,7 @@ export class DmWebRTCCall {
     const handleConnectionChange = () => {
       const state = this.pc?.connectionState || this.pc?.iceConnectionState;
       if (state === 'connected') {
+        this.reconnectAttempt = 0; // Reset on successful connection
         this.clearReconnectTimer();
         this.clearInitialConnectTimer();
         this.emitState('live');
@@ -371,12 +397,13 @@ export class DmWebRTCCall {
 
     this.pc.onconnectionstatechange = handleConnectionChange;
     this.pc.oniceconnectionstatechange = handleConnectionChange;
+    return true;
   }
 
   async startAsCaller() {
     if (this.closed) return;
-    await this.init();
-    if (!this.pc) return;
+    const success = await this.init();
+    if (!success || !this.pc) return;
 
     this.emitState('connecting');
     this.startInitialConnectWindow();
@@ -396,8 +423,8 @@ export class DmWebRTCCall {
 
   async handleOffer(offer: AnySessionDescription) {
     if (this.closed) return;
-    await this.init();
-    if (!this.pc) return;
+    const success = await this.init();
+    if (!success || !this.pc) return;
 
     const WebRTC = getWebRTCModule();
     this.emitState('connecting');
@@ -452,6 +479,7 @@ export class DmWebRTCCall {
   toggleMute() {
     if (!this.localStream) return this.muted;
     const tracks = this.localStream.getAudioTracks?.() ?? [];
+    if (tracks.length === 0) return this.muted;
     this.muted = !this.muted;
     tracks.forEach((track: { enabled: boolean }) => {
       track.enabled = !this.muted;
@@ -462,6 +490,7 @@ export class DmWebRTCCall {
   toggleVideoEnabled() {
     if (!this.localStream || this.options.mediaMode !== 'video') return this.videoEnabled;
     const tracks = this.localStream.getVideoTracks?.() ?? [];
+    if (tracks.length === 0) return this.videoEnabled;
     this.videoEnabled = !this.videoEnabled;
     tracks.forEach((track: { enabled: boolean }) => {
       track.enabled = this.videoEnabled;
@@ -469,11 +498,25 @@ export class DmWebRTCCall {
     return this.videoEnabled;
   }
 
+  /**
+   * Switch between front and rear camera (video mode only).
+   */
+  switchCamera() {
+    if (!this.localStream || this.options.mediaMode !== 'video') return;
+    const videoTracks = this.localStream.getVideoTracks?.() ?? [];
+    for (const track of videoTracks) {
+      if (typeof track._switchCamera === 'function') {
+        track._switchCamera();
+      }
+    }
+  }
+
   async close(sendEndedSignal: boolean, finalState: 'off' | 'failed' = 'off') {
     if (this.closed) return;
     this.closed = true;
     this.pendingCandidates = [];
     this.remoteDescSet = false;
+    this.reconnectAttempt = 0;
     this.clearReconnectTimer();
     this.clearInitialConnectTimer();
 
@@ -517,14 +560,33 @@ export class DmWebRTCCall {
     this.options.callbacks.onStateChange(state);
   }
 
+  /**
+   * Reconnection with exponential backoff (max 3 attempts: 2s, 4s, 8s).
+   */
   private startReconnectWindow() {
     if (this.reconnectTimer || this.closed) return;
     this.clearInitialConnectTimer();
+
+    this.reconnectAttempt += 1;
+
+    if (this.reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+      this.options.callbacks.onError?.(
+        `Call lost after ${MAX_RECONNECT_ATTEMPTS} reconnect attempts`,
+      );
+      this.close(true, 'failed').catch(() => null);
+      return;
+    }
+
     this.emitState('reconnecting');
+    this.options.callbacks.onReconnectAttempt?.(
+      this.reconnectAttempt,
+      MAX_RECONNECT_ATTEMPTS,
+    );
     this.options.sendSignal('call-state', {
       conversationId: this.options.conversationId,
       userId: this.options.userId,
       state: 'reconnecting',
+      attempt: this.reconnectAttempt,
     });
 
     try {
@@ -533,11 +595,17 @@ export class DmWebRTCCall {
       // ignore restart errors and rely on timeout fallback.
     }
 
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, this.reconnectAttempt - 1);
+
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.options.callbacks.onError?.('Call reconnect timeout');
-      this.close(false, 'failed').catch(() => null);
-    }, RECONNECT_TIMEOUT_MS);
+      if (this.closed) return;
+      // If still not connected, try next attempt
+      const state = this.pc?.connectionState || this.pc?.iceConnectionState;
+      if (state !== 'connected') {
+        this.startReconnectWindow();
+      }
+    }, delay);
   }
 
   private clearReconnectTimer() {

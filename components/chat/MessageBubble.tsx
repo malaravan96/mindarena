@@ -19,15 +19,31 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
-import { borderRadius, fontSize, fontWeight, spacing } from '@/constants/theme';
+import {
+  borderRadius,
+  fontSize,
+  fontWeight,
+  spacing,
+  chatBubble,
+  chatMedia,
+  chatStatus,
+} from '@/constants/theme';
 import type { DmMessage, DmMessageStatus, DmReactionGroup } from '@/lib/types';
 import { PollBubble } from '@/components/chat/PollBubble';
 import { isSingleEmoji } from '@/lib/emojiUtils';
 import { TwemojiSvg } from '@/components/chat/TwemojiSvg';
+import { BubbleTail } from '@/components/chat/BubbleTail';
+import { VoiceWaveform } from '@/components/chat/VoiceWaveform';
+import { LinkPreviewCard } from '@/components/chat/LinkPreviewCard';
+import { extractFirstUrl } from '@/lib/linkPreview';
+
+// ── Props ────────────────────────────────────────────────────────
 
 interface MessageBubbleProps {
   item: DmMessage;
   isOwn: boolean;
+  isFirstInGroup?: boolean;
+  isLastInGroup?: boolean;
   onImagePress?: (url: string) => void;
   onVoicePress?: (url: string, messageId: string) => void;
   playingVoiceId?: string | null;
@@ -46,27 +62,31 @@ interface MessageBubbleProps {
   onForward?: () => void;
 }
 
+// ── Status Checkmarks (16px) ─────────────────────────────────────
+
 function StatusIcon({ status }: { status?: DmMessageStatus }) {
-  const { colors } = useTheme();
+  const size = chatStatus.iconSize;
   if (!status || status === 'sent') {
-    return <Ionicons name="checkmark" size={12} color={colors.textTertiary} />;
+    return <Ionicons name="checkmark" size={size} color="#8696a0" />;
   }
   if (status === 'delivered') {
     return (
       <View style={{ flexDirection: 'row' }}>
-        <Ionicons name="checkmark" size={12} color={colors.textTertiary} />
-        <Ionicons name="checkmark" size={12} color={colors.textTertiary} style={{ marginLeft: -6 }} />
+        <Ionicons name="checkmark" size={size} color="#8696a0" />
+        <Ionicons name="checkmark" size={size} color="#8696a0" style={{ marginLeft: -size * 0.45 }} />
       </View>
     );
   }
-  // seen
+  // seen — blue
   return (
     <View style={{ flexDirection: 'row' }}>
-      <Ionicons name="checkmark" size={12} color={colors.primary} />
-      <Ionicons name="checkmark" size={12} color={colors.primary} style={{ marginLeft: -6 }} />
+      <Ionicons name="checkmark" size={size} color="#53bdeb" />
+      <Ionicons name="checkmark" size={size} color="#53bdeb" style={{ marginLeft: -size * 0.45 }} />
     </View>
   );
 }
+
+// ── Helpers ──────────────────────────────────────────────────────
 
 function formatBytes(bytes?: number | null): string {
   if (!bytes) return '';
@@ -75,60 +95,79 @@ function formatBytes(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDuration(secs?: number | null): string {
-  if (!secs) return '';
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 function getReplyPreview(msg: DmMessage): string {
   const type = msg.message_type ?? 'text';
-  if (type === 'image') return '[image]';
-  if (type === 'voice') return '[voice message]';
-  if (type === 'video') return '[video]';
-  if (type === 'file') return '[file]';
+  if (type === 'image') return 'Photo';
+  if (type === 'voice') return 'Voice message';
+  if (type === 'video') return 'Video';
+  if (type === 'file') return 'File';
   return msg.body || '';
 }
 
-interface ReplyQuoteBoxProps {
+// ── Reply Quote ──────────────────────────────────────────────────
+
+function ReplyQuoteBox({
+  replyTo,
+  senderName,
+  onPress,
+  accentColor,
+  isOwn,
+}: {
   replyTo: DmMessage;
   senderName: string;
   onPress?: () => void;
-  primaryColor: string;
-  textColor: string;
-  surfaceColor: string;
-}
+  accentColor: string;
+  isOwn: boolean;
+}) {
+  const bgColor = isOwn ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.04)';
+  const bodyColor = isOwn ? 'rgba(0,0,0,0.5)' : '#666';
 
-function ReplyQuoteBox({ replyTo, senderName, onPress, primaryColor, textColor, surfaceColor }: ReplyQuoteBoxProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.replyQuoteBox, { borderLeftColor: primaryColor, backgroundColor: surfaceColor }]}
+      style={[styles.replyQuoteBox, { borderLeftColor: accentColor, backgroundColor: bgColor }]}
     >
-      <Text style={[styles.replyQuoteName, { color: primaryColor }]} numberOfLines={1}>
+      <Text style={[styles.replyQuoteName, { color: accentColor }]} numberOfLines={1}>
         {senderName}
       </Text>
-      <Text style={[styles.replyQuoteBody, { color: textColor }]} numberOfLines={2}>
+      <Text style={[styles.replyQuoteBody, { color: bodyColor }]} numberOfLines={2}>
         {getReplyPreview(replyTo)}
       </Text>
     </Pressable>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Reaction pills with TwemojiSvg + animated entrance
-// ---------------------------------------------------------------------------
+// ── In-Bubble Meta (timestamp + edited + status) ─────────────────
 
-interface ReactionPillsRowProps {
-  reactions: DmReactionGroup[];
-  onReactionPress?: (emoji: string) => void;
+const InBubbleMeta = React.memo(function InBubbleMeta({
+  timeStr,
+  isOwn,
+  isEdited,
+  isDeleted,
+  status,
+  overlay,
+}: {
+  timeStr: string;
   isOwn: boolean;
-  primaryColor: string;
-  surfaceColor: string;
-  borderColor: string;
-  textColor: string;
-}
+  isEdited: boolean;
+  isDeleted: boolean;
+  status?: DmMessageStatus;
+  overlay?: boolean;
+}) {
+  const metaColor = overlay ? 'rgba(255,255,255,0.85)' : '#8696a0';
+
+  return (
+    <View style={[styles.inBubbleMeta, overlay && styles.inBubbleMetaOverlay]}>
+      {isEdited && !isDeleted && (
+        <Text style={[styles.editedLabel, { color: metaColor }]}>edited</Text>
+      )}
+      <Text style={[styles.inBubbleTime, { color: metaColor }]}>{timeStr}</Text>
+      {isOwn && !isDeleted && <StatusIcon status={status} />}
+    </View>
+  );
+});
+
+// ── Reaction Pills ───────────────────────────────────────────────
 
 const AnimatedReactionPill = React.memo(function AnimatedReactionPill({
   group,
@@ -170,7 +209,23 @@ const AnimatedReactionPill = React.memo(function AnimatedReactionPill({
   );
 });
 
-function ReactionPillsRow({ reactions, onReactionPress, isOwn, primaryColor, surfaceColor, borderColor, textColor }: ReactionPillsRowProps) {
+function ReactionPillsRow({
+  reactions,
+  onReactionPress,
+  isOwn,
+  primaryColor,
+  surfaceColor,
+  borderColor,
+  textColor,
+}: {
+  reactions: DmReactionGroup[];
+  onReactionPress?: (emoji: string) => void;
+  isOwn: boolean;
+  primaryColor: string;
+  surfaceColor: string;
+  borderColor: string;
+  textColor: string;
+}) {
   return (
     <View style={[styles.reactionRow, { justifyContent: isOwn ? 'flex-end' : 'flex-start' }]}>
       {reactions.map((group, i) => (
@@ -189,25 +244,14 @@ function ReactionPillsRow({ reactions, onReactionPress, isOwn, primaryColor, sur
   );
 }
 
-// ---------------------------------------------------------------------------
-// BurstOverlay — "Supernova" effect: squash → 12 multi-ring particles → sparkle settle
-// ---------------------------------------------------------------------------
+// ── Burst Overlay (Supernova effect) ─────────────────────────────
 
 const BURST_INNER = 4;
 const BURST_MID = 4;
 const BURST_OUTER = 4;
-const TOTAL_PARTICLES = BURST_INNER + BURST_MID + BURST_OUTER;
-const SPARKLE_COUNT = 6;
-
-interface BurstOverlayProps {
-  visible: boolean;
-  origin: { x: number; y: number };
-  emoji: string;
-  onDone: () => void;
-}
 
 interface ParticleConfig {
-  angle: number; // radians
+  angle: number;
   radius: number;
   duration: number;
   sizeMultiplier: number;
@@ -215,17 +259,14 @@ interface ParticleConfig {
 
 function generateParticles(): ParticleConfig[] {
   const particles: ParticleConfig[] = [];
-  // Inner ring: fast, short distance
   for (let i = 0; i < BURST_INNER; i++) {
     const angle = ((360 / BURST_INNER) * i + 15) * (Math.PI / 180);
     particles.push({ angle, radius: 80, duration: 450, sizeMultiplier: 0.7 });
   }
-  // Mid ring: medium
   for (let i = 0; i < BURST_MID; i++) {
     const angle = ((360 / BURST_MID) * i + 0) * (Math.PI / 180);
     particles.push({ angle, radius: 140, duration: 550, sizeMultiplier: 1.0 });
   }
-  // Outer ring: slow, far
   for (let i = 0; i < BURST_OUTER; i++) {
     const angle = ((360 / BURST_OUTER) * i + 30) * (Math.PI / 180);
     particles.push({ angle, radius: 200, duration: 650, sizeMultiplier: 0.6 });
@@ -235,43 +276,44 @@ function generateParticles(): ParticleConfig[] {
 
 const PARTICLE_CONFIGS = generateParticles();
 
-// Pre-computed sparkle positions (random-ish offsets around center)
 const SPARKLE_OFFSETS = [
   { x: -50, y: -40 }, { x: 45, y: -35 },
   { x: -35, y: 30 }, { x: 55, y: 25 },
   { x: -15, y: -55 }, { x: 20, y: 50 },
 ];
 
-const BurstOverlay = React.memo(function BurstOverlay({ visible, origin, emoji, onDone }: BurstOverlayProps) {
-  // Main emoji squash/stretch
+const BurstOverlay = React.memo(function BurstOverlay({
+  visible,
+  origin,
+  emoji,
+  onDone,
+}: {
+  visible: boolean;
+  origin: { x: number; y: number };
+  emoji: string;
+  onDone: () => void;
+}) {
   const mainScale = useSharedValue(1);
-  // Particle progress values (0 → 1)
   const particleProgress = useMemo(() => PARTICLE_CONFIGS.map(() => makeMutable(0)), []);
-  // Sparkle scales
   const sparkleScales = useMemo(() => SPARKLE_OFFSETS.map(() => makeMutable(0)), []);
 
   useEffect(() => {
     if (!visible) return;
-
-    // Reset
     mainScale.value = 1;
     particleProgress.forEach((p) => { p.value = 0; });
     sparkleScales.forEach((s) => { s.value = 0; });
 
-    // Phase 1: Squash & stretch (0-300ms)
     mainScale.value = withSequence(
       withTiming(0.7, { duration: 80 }),
       withSpring(1.2, { damping: 4, stiffness: 300, mass: 0.6 }),
       withSpring(1.0, { damping: 10, stiffness: 120, mass: 1 }),
     );
 
-    // Phase 2: Particle burst (100-700ms)
     particleProgress.forEach((p, i) => {
       const config = PARTICLE_CONFIGS[i];
       p.value = withDelay(80 + i * 15, withTiming(1, { duration: config.duration, easing: Easing.out(Easing.cubic) }));
     });
 
-    // Phase 3: Sparkle twinkle (400-900ms)
     sparkleScales.forEach((s, i) => {
       s.value = withDelay(
         400 + i * 60,
@@ -282,7 +324,6 @@ const BurstOverlay = React.memo(function BurstOverlay({ visible, origin, emoji, 
       );
     });
 
-    // Auto-close after animation
     const timer = setTimeout(onDone, 950);
     return () => clearTimeout(timer);
   }, [visible]);
@@ -292,24 +333,11 @@ const BurstOverlay = React.memo(function BurstOverlay({ visible, origin, emoji, 
   return (
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onDone}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onDone}>
-        {/* Main emoji with squash/stretch */}
         <AnimatedBurstEmoji emoji={emoji} origin={origin} scaleValue={mainScale} size={72} />
-
-        {/* Shockwave ring */}
         <ShockwaveRing origin={origin} />
-
-        {/* Particles */}
         {PARTICLE_CONFIGS.map((config, i) => (
-          <BurstParticle
-            key={`p-${i}`}
-            emoji={emoji}
-            origin={origin}
-            config={config}
-            progress={particleProgress[i]}
-          />
+          <BurstParticle key={`p-${i}`} emoji={emoji} origin={origin} config={config} progress={particleProgress[i]} />
         ))}
-
-        {/* Sparkles */}
         {SPARKLE_OFFSETS.map((offset, i) => (
           <SparkleView key={`s-${i}`} origin={origin} offset={offset} scale={sparkleScales[i]} />
         ))}
@@ -327,7 +355,6 @@ function AnimatedBurstEmoji({
     top: origin.y - size / 2,
     transform: [{ scale: scaleValue.value }],
   }));
-
   return (
     <Animated.View style={style}>
       <TwemojiSvg emoji={emoji} size={size} />
@@ -342,27 +369,21 @@ function BurstParticle({
   const style = useAnimatedStyle(() => {
     const p = progress.value;
     const tx = Math.cos(config.angle) * config.radius * p;
-    // Curved path: add a slight perpendicular offset that peaks at midpoint
     const perpendicular = Math.sin(config.angle + Math.PI / 2);
     const ty = Math.sin(config.angle) * config.radius * p + perpendicular * 20 * Math.sin(p * Math.PI);
     const s = interpolate(p, [0, 0.2, 0.5, 1], [0.2, 1.3, 1.0, 0.3]);
     const opacity = interpolate(p, [0, 0.15, 0.7, 1], [0, 1, 0.8, 0]);
     const rotation = p * 360 * (config.sizeMultiplier > 0.8 ? 1 : -1);
-
     return {
       position: 'absolute' as const,
       left: origin.x - particleSize / 2,
       top: origin.y - particleSize / 2,
       opacity,
       transform: [
-        { translateX: tx },
-        { translateY: ty },
-        { scale: s },
-        { rotate: `${rotation}deg` },
+        { translateX: tx }, { translateY: ty }, { scale: s }, { rotate: `${rotation}deg` },
       ],
     };
   });
-
   return (
     <Animated.View style={style}>
       <TwemojiSvg emoji={emoji} size={particleSize} />
@@ -372,26 +393,19 @@ function BurstParticle({
 
 function ShockwaveRing({ origin }: { origin: { x: number; y: number } }) {
   const progress = useSharedValue(0);
-
   useEffect(() => {
     progress.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.cubic) });
   }, []);
-
   const style = useAnimatedStyle(() => {
     const size = interpolate(progress.value, [0, 1], [20, 160]);
     const opacity = interpolate(progress.value, [0, 0.3, 1], [0.4, 0.2, 0]);
     return {
       position: 'absolute' as const,
-      left: origin.x - size / 2,
-      top: origin.y - size / 2,
-      width: size,
-      height: size,
-      borderRadius: size / 2,
-      borderWidth: 2,
-      borderColor: `rgba(255,255,255,${opacity})`,
+      left: origin.x - size / 2, top: origin.y - size / 2,
+      width: size, height: size, borderRadius: size / 2,
+      borderWidth: 2, borderColor: `rgba(255,255,255,${opacity})`,
     };
   });
-
   return <Animated.View style={style} />;
 }
 
@@ -400,18 +414,13 @@ function SparkleView({
 }: { origin: { x: number; y: number }; offset: { x: number; y: number }; scale: SharedValue<number> }) {
   const style = useAnimatedStyle(() => {
     const s = scale.value;
-    const rotation = s * 90;
     return {
       position: 'absolute' as const,
-      left: origin.x + offset.x - 6,
-      top: origin.y + offset.y - 6,
-      width: 12,
-      height: 12,
-      opacity: s,
-      transform: [{ scale: s }, { rotate: `${rotation}deg` }],
+      left: origin.x + offset.x - 6, top: origin.y + offset.y - 6,
+      width: 12, height: 12, opacity: s,
+      transform: [{ scale: s }, { rotate: `${s * 90}deg` }],
     };
   });
-
   return (
     <Animated.View style={style}>
       <View style={sparkleStyles.star}>
@@ -428,13 +437,13 @@ const sparkleStyles = StyleSheet.create({
   vertical: { position: 'absolute', width: 2, height: 12, backgroundColor: '#FFD700', borderRadius: 1 },
 });
 
-// ---------------------------------------------------------------------------
-// MessageBubble
-// ---------------------------------------------------------------------------
+// ── Main MessageBubble ───────────────────────────────────────────
 
-export function MessageBubble({
+export const MessageBubble = React.memo(function MessageBubble({
   item,
   isOwn,
+  isFirstInGroup = true,
+  isLastInGroup = true,
   onImagePress,
   onVoicePress,
   playingVoiceId,
@@ -452,12 +461,43 @@ export function MessageBubble({
   const msgType = item.message_type ?? 'text';
   const isDeleted = item.is_deleted === true;
   const isEdited = !isDeleted && !!item.edited_at;
-  const timeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const timeStr = new Date(item.created_at).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
-  const bubbleBg = isOwn ? `${colors.primary}16` : colors.surfaceVariant;
-  const bubbleBorder = isOwn ? `${colors.primary}35` : colors.border;
+  // ── WhatsApp-style bubble colors ──
+  const ownBubbleBg = `${colors.primary}22`;
+  const peerBubbleBg = colors.surface;
+  const bubbleBg = isDeleted
+    ? `${colors.textTertiary}10`
+    : isOwn
+      ? ownBubbleBg
+      : peerBubbleBg;
 
-  // --- Swipe-to-reply gesture (Reanimated + Gesture Handler) ---
+  // ── Dynamic border radius (tail side is smaller on last-in-group) ──
+  const bubbleRadiusStyle = {
+    borderTopLeftRadius: chatBubble.radius,
+    borderTopRightRadius: chatBubble.radius,
+    borderBottomLeftRadius: isOwn
+      ? chatBubble.radius
+      : isLastInGroup
+        ? chatBubble.tailRadius
+        : chatBubble.radius,
+    borderBottomRightRadius: isOwn
+      ? isLastInGroup
+        ? chatBubble.tailRadius
+        : chatBubble.radius
+      : chatBubble.radius,
+  };
+
+  const rowMarginTop = isFirstInGroup
+    ? chatBubble.defaultMargin
+    : chatBubble.groupedMargin;
+
+  const textColor = colors.text;
+
+  // ── Swipe-to-reply gesture ──
   const swipeX = useSharedValue(0);
 
   const fireSwipeReply = useCallback(() => {
@@ -487,7 +527,7 @@ export function MessageBubble({
     opacity: interpolate(swipeX.value, [0, 40], [0, 1], 'clamp'),
   }));
 
-  // --- Big emoji detection ---
+  // ── Big emoji detection ──
   const replyQuoteSenderName = replyTo
     ? replyTo.sender_id === currentUserId
       ? 'You'
@@ -497,25 +537,21 @@ export function MessageBubble({
   const isBigEmoji =
     msgType === 'text' && !isDeleted && !replyTo && isSingleEmoji(item.body ?? '');
 
-  // --- Big emoji idle: compound "Breathe & Hover" animation ---
+  // ── Big emoji idle animation ──
   const floatY = useSharedValue(0);
   const wiggleRot = useSharedValue(0);
   const breatheScale = useSharedValue(1);
 
   useEffect(() => {
     if (!isBigEmoji) return;
-
-    // Float: 0 → -4 → 0, period 2000ms
     floatY.value = withRepeat(
       withSequence(
         withTiming(-4, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
         withTiming(0, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
       ),
-      -1, // infinite
+      -1,
       true,
     );
-
-    // Wiggle: -2deg → 2deg, period 2400ms
     wiggleRot.value = withRepeat(
       withSequence(
         withTiming(-2, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
@@ -524,8 +560,6 @@ export function MessageBubble({
       -1,
       true,
     );
-
-    // Breathe: 1.0 → 1.04, period 1600ms
     breatheScale.value = withRepeat(
       withSequence(
         withTiming(1.04, { duration: 800, easing: Easing.inOut(Easing.ease) }),
@@ -534,7 +568,6 @@ export function MessageBubble({
       -1,
       true,
     );
-
     return () => {
       floatY.value = 0;
       wiggleRot.value = 0;
@@ -550,19 +583,19 @@ export function MessageBubble({
     ],
   }));
 
-  // --- Burst state ---
+  // ── Burst state ──
   const emojiRef = useRef<View>(null);
   const [burstVisible, setBurstVisible] = useState(false);
   const [burstOrigin, setBurstOrigin] = useState({ x: 0, y: 0 });
 
   const handleBigEmojiPress = () => {
-    emojiRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
-      setBurstOrigin({ x: pageX + width / 2, y: pageY + height / 2 });
+    emojiRef.current?.measure((_x, _y, w, h, pageX, pageY) => {
+      setBurstOrigin({ x: pageX + w / 2, y: pageY + h / 2 });
       setBurstVisible(true);
     });
   };
 
-  // --- Emoji-only message entrance ---
+  // ── Big emoji entrance ──
   const entranceScale = useSharedValue(isBigEmoji ? 0 : 1);
   const entranceY = useSharedValue(isBigEmoji ? 30 : 0);
 
@@ -573,111 +606,180 @@ export function MessageBubble({
   }, [isBigEmoji]);
 
   const entranceStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: entranceScale.value },
-      { translateY: entranceY.value },
-    ],
+    transform: [{ scale: entranceScale.value }, { translateY: entranceY.value }],
   }));
 
+  // ── Content renderer ──
   const renderContent = () => {
     if (isDeleted) {
       return (
-        <Text style={[styles.deletedText, { color: colors.textSecondary }]}>
-          This message was deleted
-        </Text>
+        <View>
+          <View style={styles.deletedRow}>
+            <Ionicons name="ban-outline" size={14} color={colors.textSecondary} />
+            <Text style={[styles.deletedText, { color: colors.textSecondary }]}>
+              This message was deleted
+            </Text>
+          </View>
+          <InBubbleMeta
+            timeStr={timeStr}
+            isOwn={isOwn}
+            isEdited={false}
+            isDeleted
+            status={item.status}
+          />
+        </View>
       );
     }
 
     if (msgType === 'poll') {
       let pollId: string | null = null;
-      try { pollId = JSON.parse(item.body)?.poll_id ?? null; } catch { /* ignore */ }
-      if (pollId) {
-        return <PollBubble pollId={pollId} currentUserId={currentUserId ?? null} />;
+      try {
+        pollId = JSON.parse(item.body)?.poll_id ?? null;
+      } catch {
+        /* ignore */
       }
-      return <Text style={[styles.msgBody, { color: colors.textSecondary, fontStyle: 'italic' }]}>Poll unavailable</Text>;
+      if (pollId) {
+        return (
+          <View>
+            <PollBubble pollId={pollId} currentUserId={currentUserId ?? null} />
+            <InBubbleMeta
+              timeStr={timeStr}
+              isOwn={isOwn}
+              isEdited={isEdited}
+              isDeleted={false}
+              status={item.status}
+            />
+          </View>
+        );
+      }
+      return (
+        <Text style={[styles.msgBody, { color: colors.textSecondary, fontStyle: 'italic' }]}>
+          Poll unavailable
+        </Text>
+      );
     }
 
     if (msgType === 'image' && item.attachment_url) {
       return (
-        <Pressable onPress={() => onImagePress?.(item.attachment_url!)}>
-          <Image
-            source={{ uri: item.attachment_url }}
-            style={styles.imageThumbnail}
-            resizeMode="cover"
-          />
+        <View>
+          <Pressable onPress={() => onImagePress?.(item.attachment_url!)}>
+            <View style={styles.imageWrap}>
+              <Image
+                source={{ uri: item.attachment_url }}
+                style={styles.imageThumbnail}
+                resizeMode="cover"
+              />
+              {!item.body && (
+                <InBubbleMeta
+                  timeStr={timeStr}
+                  isOwn={isOwn}
+                  isEdited={isEdited}
+                  isDeleted={false}
+                  status={item.status}
+                  overlay
+                />
+              )}
+            </View>
+          </Pressable>
           {item.body ? (
-            <Text style={[styles.msgBody, { color: colors.text, marginTop: spacing.xs }]}>{item.body}</Text>
+            <View style={styles.imageCaptionWrap}>
+              <Text style={[styles.msgBody, { color: textColor }]}>{item.body}</Text>
+              <InBubbleMeta
+                timeStr={timeStr}
+                isOwn={isOwn}
+                isEdited={isEdited}
+                isDeleted={false}
+                status={item.status}
+              />
+            </View>
           ) : null}
-        </Pressable>
+        </View>
       );
     }
 
     if (msgType === 'voice' && item.attachment_url) {
-      const isPlaying = playingVoiceId === item.id;
       return (
-        <Pressable
-          style={styles.voiceRow}
-          onPress={() => onVoicePress?.(item.attachment_url!, item.id)}
-        >
-          <View style={[styles.voiceIconWrap, { backgroundColor: `${colors.primary}20` }]}>
-            <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={18}
-              color={colors.primary}
-            />
-          </View>
-          <View>
-            <Text style={[styles.voiceLabel, { color: colors.text }]}>Voice message</Text>
-            {item.attachment_duration ? (
-              <Text style={[styles.voiceDuration, { color: colors.textSecondary }]}>
-                {formatDuration(item.attachment_duration)}
-              </Text>
-            ) : null}
-          </View>
-        </Pressable>
+        <View>
+          <VoiceWaveform
+            duration={item.attachment_duration || 0}
+            isPlaying={playingVoiceId === item.id}
+            isOwn={isOwn}
+            onPlayPause={() => onVoicePress?.(item.attachment_url!, item.id)}
+          />
+          <InBubbleMeta
+            timeStr={timeStr}
+            isOwn={isOwn}
+            isEdited={isEdited}
+            isDeleted={false}
+            status={item.status}
+          />
+        </View>
       );
     }
 
     if (msgType === 'video' && item.attachment_url) {
       return (
-        <Pressable
-          style={styles.videoThumb}
-          onPress={() => onImagePress?.(item.attachment_url!)}
-        >
-          <View style={[styles.videoOverlay, { backgroundColor: 'rgba(0,0,0,0.45)' }]}>
-            <Ionicons name="play-circle" size={36} color="#fff" />
-          </View>
+        <View>
+          <Pressable
+            style={styles.videoThumb}
+            onPress={() => onImagePress?.(item.attachment_url!)}
+          >
+            <View style={styles.videoOverlay}>
+              <Ionicons name="play-circle" size={36} color="#fff" />
+            </View>
+            <InBubbleMeta
+              timeStr={timeStr}
+              isOwn={isOwn}
+              isEdited={isEdited}
+              isDeleted={false}
+              status={item.status}
+              overlay
+            />
+          </Pressable>
           {item.body ? (
-            <Text style={[styles.msgBody, { color: colors.text, marginTop: spacing.xs }]}>{item.body}</Text>
+            <View style={styles.imageCaptionWrap}>
+              <Text style={[styles.msgBody, { color: textColor }]}>{item.body}</Text>
+            </View>
           ) : null}
-        </Pressable>
+        </View>
       );
     }
 
     if (msgType === 'file' && item.attachment_url) {
       const filename = item.body || 'File';
       return (
-        <Pressable
-          style={styles.fileRow}
-          onPress={() => Linking.openURL(item.attachment_url!).catch(() => null)}
-        >
-          <View style={[styles.fileIcon, { backgroundColor: `${colors.secondary}20` }]}>
-            <Ionicons name="document-outline" size={20} color={colors.secondary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={2}>{filename}</Text>
-            {item.attachment_size ? (
-              <Text style={[styles.fileSize, { color: colors.textSecondary }]}>
-                {formatBytes(item.attachment_size)}
+        <View>
+          <Pressable
+            style={styles.fileRow}
+            onPress={() => Linking.openURL(item.attachment_url!).catch(() => null)}
+          >
+            <View style={[styles.fileIcon, { backgroundColor: `${colors.secondary}20` }]}>
+              <Ionicons name="document-outline" size={20} color={colors.secondary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.fileName, { color: textColor }]} numberOfLines={2}>
+                {filename}
               </Text>
-            ) : null}
-          </View>
-          <Ionicons name="download-outline" size={16} color={colors.textSecondary} />
-        </Pressable>
+              {item.attachment_size ? (
+                <Text style={[styles.fileSize, { color: colors.textSecondary }]}>
+                  {formatBytes(item.attachment_size)}
+                </Text>
+              ) : null}
+            </View>
+            <Ionicons name="download-outline" size={16} color={colors.textSecondary} />
+          </Pressable>
+          <InBubbleMeta
+            timeStr={timeStr}
+            isOwn={isOwn}
+            isEdited={isEdited}
+            isDeleted={false}
+            status={item.status}
+          />
+        </View>
       );
     }
 
-    // Default: text
+    // ── Big emoji ──
     if (isBigEmoji) {
       return (
         <Animated.View style={entranceStyle}>
@@ -688,15 +790,30 @@ export function MessageBubble({
               </Animated.View>
             </Pressable>
           </View>
+          <InBubbleMeta
+            timeStr={timeStr}
+            isOwn={isOwn}
+            isEdited={isEdited}
+            isDeleted={false}
+            status={item.status}
+          />
         </Animated.View>
       );
     }
+
+    // ── Default: text ──
+    const hasLink = item.body ? extractFirstUrl(item.body) : null;
     return (
       <View>
-        <Text style={[styles.msgBody, { color: colors.text }]}>{item.body}</Text>
-        {isEdited && (
-          <Text style={[styles.editedLabel, { color: colors.textTertiary }]}>(edited)</Text>
-        )}
+        <Text style={[styles.msgBody, { color: textColor }]}>{item.body}</Text>
+        {hasLink && <LinkPreviewCard text={item.body!} isOwn={isOwn} />}
+        <InBubbleMeta
+          timeStr={timeStr}
+          isOwn={isOwn}
+          isEdited={isEdited}
+          isDeleted={false}
+          status={item.status}
+        />
       </View>
     );
   };
@@ -704,7 +821,7 @@ export function MessageBubble({
   const hasReactions = !isDeleted && reactions && reactions.length > 0;
 
   return (
-    <View style={{ position: 'relative' }}>
+    <View style={{ position: 'relative', marginTop: rowMarginTop }}>
       {/* Reply icon revealed as bubble slides right */}
       <Animated.View
         pointerEvents="none"
@@ -727,7 +844,11 @@ export function MessageBubble({
 
       <GestureDetector gesture={panGesture}>
         <Animated.View
-          style={[styles.msgRow, { alignItems: isOwn ? 'flex-end' : 'flex-start' }, swipeStyle]}
+          style={[
+            styles.msgRow,
+            { alignItems: isOwn ? 'flex-end' : 'flex-start' },
+            swipeStyle,
+          ]}
         >
           <Pressable onLongPress={!isDeleted ? onLongPress : undefined} delayLongPress={350}>
             <View
@@ -736,8 +857,10 @@ export function MessageBubble({
                 isBigEmoji
                   ? styles.bigEmojiBubble
                   : {
-                      backgroundColor: isDeleted ? `${colors.textTertiary}10` : bubbleBg,
-                      borderColor: isDeleted ? colors.border : bubbleBorder,
+                      backgroundColor: bubbleBg,
+                      ...bubbleRadiusStyle,
+                      borderWidth: isDeleted ? 1 : 0,
+                      borderColor: isDeleted ? colors.border : 'transparent',
                     },
               ]}
             >
@@ -751,18 +874,21 @@ export function MessageBubble({
                   replyTo={replyTo}
                   senderName={replyQuoteSenderName}
                   onPress={onReplyQuotePress}
-                  primaryColor={colors.primary}
-                  textColor={colors.textSecondary}
-                  surfaceColor={`${colors.primary}0d`}
+                  accentColor={colors.primary}
+                  isOwn={isOwn}
                 />
               )}
               {renderContent()}
+              {/* WhatsApp-style bubble tail on last message in group */}
+              {isLastInGroup && !isBigEmoji && !isDeleted && (
+                <BubbleTail
+                  direction={isOwn ? 'right' : 'left'}
+                  color={isOwn ? ownBubbleBg : peerBubbleBg}
+                />
+              )}
             </View>
           </Pressable>
-          <View style={styles.metaRow}>
-            <Text style={[styles.msgTime, { color: colors.textTertiary }]}>{timeStr}</Text>
-            {isOwn && !isDeleted && <StatusIcon status={item.status} />}
-          </View>
+
           {hasReactions && (
             <ReactionPillsRow
               reactions={reactions!}
@@ -787,48 +913,78 @@ export function MessageBubble({
       )}
     </View>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.item.id === next.item.id &&
+    prev.item.body === next.item.body &&
+    prev.item.status === next.item.status &&
+    prev.item.edited_at === next.item.edited_at &&
+    prev.item.is_deleted === next.item.is_deleted &&
+    prev.isOwn === next.isOwn &&
+    prev.isFirstInGroup === next.isFirstInGroup &&
+    prev.isLastInGroup === next.isLastInGroup &&
+    prev.playingVoiceId === next.playingVoiceId &&
+    prev.isPinned === next.isPinned &&
+    prev.reactions === next.reactions &&
+    prev.replyTo === next.replyTo
+  );
+});
+
+// ── Styles ───────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  msgRow: { gap: 4 },
+  msgRow: { gap: 2 },
   bubble: {
-    maxWidth: '84%',
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    maxWidth: chatBubble.maxWidth,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
     overflow: 'hidden',
   },
-  msgBody: { fontSize: fontSize.sm, lineHeight: fontSize.sm * 1.5 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  msgTime: { fontSize: fontSize.xs },
-  imageThumbnail: { width: 200, height: 150, borderRadius: borderRadius.md },
-  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
-  voiceIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+  msgBody: {
+    fontSize: fontSize.sm,
+    lineHeight: fontSize.sm * 1.5,
   },
-  voiceLabel: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
-  voiceDuration: { fontSize: fontSize.xs, marginTop: 2 },
+  // Image
+  imageWrap: {
+    position: 'relative',
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  imageThumbnail: {
+    width: chatMedia.imageMaxWidth,
+    height: chatMedia.imageMaxWidth * 0.75,
+    borderRadius: borderRadius.md,
+    minWidth: chatMedia.imageMinWidth,
+  },
+  imageCaptionWrap: {
+    paddingTop: spacing.xs,
+  },
+  // Voice — now uses VoiceWaveform component
+  // Video
   videoThumb: {
-    width: 200,
-    height: 150,
+    width: chatMedia.imageMaxWidth,
+    height: chatMedia.imageMaxWidth * 0.75,
     borderRadius: borderRadius.md,
     backgroundColor: '#111',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    position: 'relative',
   },
   videoOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     borderRadius: borderRadius.md,
   },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
+  // File
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
   fileIcon: {
     width: 36,
     height: 36,
@@ -838,15 +994,40 @@ const styles = StyleSheet.create({
   },
   fileName: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
   fileSize: { fontSize: fontSize.xs, marginTop: 2 },
+  // Deleted
+  deletedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   deletedText: { fontSize: fontSize.sm, fontStyle: 'italic' },
-  editedLabel: { fontSize: 10, fontStyle: 'italic', marginTop: 2, textAlign: 'right' },
+  // In-bubble meta
+  inBubbleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 4,
+    marginTop: 2,
+  },
+  inBubbleMetaOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  inBubbleTime: { fontSize: 11 },
+  editedLabel: { fontSize: 10, fontStyle: 'italic' },
+  // Pin badge
   pinBadge: {
     position: 'absolute',
     top: 4,
     right: 4,
     zIndex: 1,
   },
-  // Reply quote box
+  // Reply quote
   replyQuoteBox: {
     borderLeftWidth: 3,
     borderRadius: borderRadius.sm,
@@ -862,7 +1043,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
-    maxWidth: '84%',
+    maxWidth: chatBubble.maxWidth,
   },
   reactionPill: {
     flexDirection: 'row',
@@ -875,6 +1056,15 @@ const styles = StyleSheet.create({
   },
   reactionCount: { fontSize: 11, fontWeight: fontWeight.semibold },
   // Big emoji
-  bigEmojiBubble: { backgroundColor: 'transparent', borderWidth: 0, paddingHorizontal: 0, paddingVertical: 0 },
-  bigEmojiWrap: { alignItems: 'center', justifyContent: 'center', padding: spacing.xs },
+  bigEmojiBubble: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  bigEmojiWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xs,
+  },
 });

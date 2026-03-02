@@ -1,30 +1,56 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Image, Modal, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
 
 const BG_COLOR = '#1a1a2e';
+const AUTO_DISMISS_MS = 60_000; // 60s
 
 export function GlobalIncomingCallOverlay() {
   const { incomingCall, acceptIncomingCall, declineIncomingCall } = useGlobalNotifications();
   const insets = useSafeAreaInsets();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-dismiss after 60 seconds
+  useEffect(() => {
+    if (incomingCall) {
+      timerRef.current = setTimeout(() => {
+        declineIncomingCall();
+      }, AUTO_DISMISS_MS);
+    }
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [incomingCall, declineIncomingCall]);
 
   if (!incomingCall) return null;
 
   const { fromName, fromAvatarUrl, mode } = incomingCall;
   const initials = fromName.slice(0, 2).toUpperCase();
-  const modeLabel = mode === 'video' ? 'Incoming Video Call' : 'Incoming Audio Call';
+  const isVideo = mode === 'video';
+  const modeLabel = isVideo ? 'Video Call' : 'Audio Call';
 
   return (
     <Modal visible animationType="slide" transparent={false} statusBarTranslucent>
       <StatusBar barStyle="light-content" backgroundColor={BG_COLOR} />
       <View style={[styles.root, { backgroundColor: BG_COLOR }]}>
-        {/* Top spacer */}
         <View style={{ height: insets.top + 24 }} />
 
         {/* Center content */}
         <View style={styles.center}>
+          {/* Call mode icon */}
+          <View style={styles.modeIconWrap}>
+            <Ionicons
+              name={isVideo ? 'videocam' : 'call'}
+              size={28}
+              color="#fff"
+            />
+          </View>
+
           {/* Avatar */}
           {fromAvatarUrl ? (
             <Image source={{ uri: fromAvatarUrl }} style={styles.avatar} />
@@ -42,16 +68,20 @@ export function GlobalIncomingCallOverlay() {
         <View style={[styles.controls, { paddingBottom: insets.bottom + 40 }]}>
           <View style={styles.buttonRow}>
             {/* Decline */}
-            <Pressable onPress={declineIncomingCall} style={[styles.btn, styles.declineBtn]}>
-              <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+            <View style={styles.buttonWrap}>
+              <Pressable onPress={declineIncomingCall} style={[styles.btn, styles.declineBtn]}>
+                <Ionicons name="call" size={28} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+              </Pressable>
               <Text style={styles.btnLabel}>Decline</Text>
-            </Pressable>
+            </View>
 
             {/* Accept */}
-            <Pressable onPress={acceptIncomingCall} style={[styles.btn, styles.acceptBtn]}>
-              <Ionicons name="call" size={28} color="#fff" />
+            <View style={styles.buttonWrap}>
+              <Pressable onPress={acceptIncomingCall} style={[styles.btn, styles.acceptBtn]}>
+                <Ionicons name={isVideo ? 'videocam' : 'call'} size={28} color="#fff" />
+              </Pressable>
               <Text style={styles.btnLabel}>Accept</Text>
-            </Pressable>
+            </View>
           </View>
         </View>
       </View>
@@ -68,6 +98,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
+  },
+  modeIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
   },
   avatar: {
     width: 120,
@@ -110,24 +149,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
   },
+  buttonWrap: {
+    alignItems: 'center',
+    gap: 12,
+  },
   btn: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 0,
   },
   btnLabel: {
-    color: '#fff',
+    color: 'rgba(255,255,255,0.8)',
     fontSize: 13,
     fontWeight: '600',
-    marginTop: 6,
-    position: 'absolute',
-    bottom: -24,
-    left: 0,
-    right: 0,
-    textAlign: 'center',
   },
   declineBtn: {
     backgroundColor: '#e74c3c',
