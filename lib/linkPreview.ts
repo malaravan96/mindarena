@@ -108,8 +108,7 @@ function parseOpenGraph(url: string, html: string): LinkPreview | null {
 
   const image = getMetaContent('og:image') || getMetaContent('twitter:image');
 
-  let favicon =
-    getMetaContent('og:site_name') ? undefined : undefined;
+  let favicon: string | undefined;
   const faviconMatch = html.match(
     /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']*)["']/i,
   );
