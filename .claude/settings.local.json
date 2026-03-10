@@ -23,7 +23,9 @@
       "Bash(export PATH=\"$ANDROID_HOME/platform-tools:$PATH\")",
       "Bash(node -e \"console.log\\(require\\(''c:/Users/Malar/Desktop/mindarena-mvp/mindarena/node_modules/expo/package.json''\\).version\\)\")",
       "Bash(npx tsx scripts/generate-emoji-map.ts)",
-      "Bash(npm uninstall @react-native-async-storage/async-storage)"
+      "Bash(npm uninstall @react-native-async-storage/async-storage)",
+      "Bash(cat \"c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\(app\\)/profile.tsx\")",
+      "Bash(wc -l c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/profile.tsx c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/player-profile.tsx)"
     ],
     "deny": [],
     "ask": []

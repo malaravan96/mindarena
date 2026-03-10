@@ -538,3 +538,34 @@ export interface TeamChallenge {
   winner_team_id?: string;
   created_at: string;
 }
+
+// ── Profile Screen ─────────────────────────────────────────
+
+export type ProfileTabKey = 'overview' | 'activity' | 'settings';
+
+export interface UserStats {
+  total_attempts: number;
+  correct_attempts: number;
+  avg_time: number;
+  best_time: number;
+  streak: number;
+  total_points: number;
+}
+
+export interface PuzzleAttempt {
+  id: string;
+  is_correct: boolean;
+  ms_taken: number;
+  created_at: string;
+  puzzle_title: string;
+  puzzle_type: string;
+}
+
+export interface LevelInfo {
+  level: number;
+  xp: number;
+  xpForCurrent: number;
+  xpForNext: number;
+  progress: number;
+  title: string;
+}

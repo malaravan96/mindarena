@@ -1,103 +1,72 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Switch } from 'react-native';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { showAlert, showConfirm } from '@/lib/alert';
 import { getCurrentUserId, getTotalDmUnread } from '@/lib/dm';
-import { getCurrentLevelProgress } from '@/lib/xp';
-import { getUserAchievements } from '@/lib/achievements';
-import { getUserTeam } from '@/lib/teams';
-import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
-import { Card } from '@/components/Card';
-import { XPProgressBar } from '@/components/rewards/XPProgressBar';
-import { BadgeGrid } from '@/components/rewards/BadgeGrid';
-import { ThemePicker } from '@/components/ThemePicker';
+import { loadOwnProfileData, getUserActivity } from '@/lib/profileStats';
+import { ProfileHeroCard } from '@/components/profile/ProfileHeroCard';
+import { ProfileTabBar } from '@/components/profile/ProfileTabBar';
+import { ProfileEditForm } from '@/components/profile/ProfileEditForm';
+import { ProfileStatsSection } from '@/components/profile/ProfileStatsSection';
+import { ProfileAchievementsSection } from '@/components/profile/ProfileAchievementsSection';
+import { ProfileActivitySection } from '@/components/profile/ProfileActivitySection';
+import { ProfileSettingsSection } from '@/components/profile/ProfileSettingsSection';
+import { ProfileShareButton } from '@/components/profile/ProfileShareButton';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fontSize, fontWeight, spacing, borderRadius, isDesktop } from '@/constants/theme';
-import type { AvailableBadge, Team } from '@/lib/types';
+import { fontSize, fontWeight, spacing, isDesktop } from '@/constants/theme';
+import type { ProfileTabKey, AvailableBadge, Team, UserStats, PuzzleAttempt, LevelInfo, ActivityFeedItem } from '@/lib/types';
 
-type IconName = React.ComponentProps<typeof Ionicons>['name'];
-
-type UserStats = {
-  total_attempts: number;
-  correct_attempts: number;
-  avg_time: number;
-  best_time: number;
-  streak: number;
-  total_points: number;
-};
-
-type PuzzleAttempt = {
-  id: string;
-  is_correct: boolean;
-  ms_taken: number;
-  created_at: string;
-  puzzle_title: string;
-  puzzle_type: string;
-};
-
-type LevelInfo = {
-  level: number;
-  xp: number;
-  xpForCurrent: number;
-  xpForNext: number;
-  progress: number;
-  title: string;
-};
-
-const modeOptions = [
-  { key: 'light' as const, icon: 'sunny-outline' as const, label: 'Light', hint: 'Always bright' },
-  { key: 'dark' as const, icon: 'moon-outline' as const, label: 'Dark', hint: 'Low light' },
-  { key: 'auto' as const, icon: 'phone-portrait-outline' as const, label: 'Auto', hint: 'System sync' },
+const PROFILE_TABS = [
+  { key: 'overview', label: 'Overview', icon: 'person-outline' as const },
+  { key: 'activity', label: 'Activity', icon: 'time-outline' as const },
+  { key: 'settings', label: 'Settings', icon: 'settings-outline' as const },
 ];
-const DISPLAY_NAME_MAX = 50;
-const USERNAME_MAX = 20;
-const BIO_MAX = 160;
 
 export default function Profile() {
   const router = useRouter();
   const { colors, setTheme, theme } = useTheme();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<ProfileTabKey>('overview');
+  const loadedTabs = useRef(new Set<ProfileTabKey>(['overview']));
+
+  // Profile form state
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
-  const [initialProfile, setInitialProfile] = useState({
-    displayName: '',
-    username: '',
-    bio: '',
-  });
+  const [initialProfile, setInitialProfile] = useState({ displayName: '', username: '', bio: '' });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+  // Data state
+  const [stats, setStats] = useState<UserStats>({
+    total_attempts: 0, correct_attempts: 0, avg_time: 0, best_time: 0, streak: 0, total_points: 0,
+  });
   const [recentAttempts, setRecentAttempts] = useState<PuzzleAttempt[]>([]);
   const [badges, setBadges] = useState<AvailableBadge[]>([]);
   const [earnedIds, setEarnedIds] = useState<Set<string>>(new Set());
   const [levelInfo, setLevelInfo] = useState<LevelInfo | null>(null);
   const [userTitle, setUserTitle] = useState<string | null>(null);
   const [myTeam, setMyTeam] = useState<Team | null>(null);
+  const [connectionCount, setConnectionCount] = useState(0);
+  const [winRate, setWinRate] = useState(0);
   const [dmUnread, setDmUnread] = useState(0);
-  const [stats, setStats] = useState<UserStats>({
-    total_attempts: 0,
-    correct_attempts: 0,
-    avg_time: 0,
-    best_time: 0,
-    streak: 0,
-    total_points: 0,
-  });
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  // Activity tab lazy data
+  const [activityFeed, setActivityFeed] = useState<ActivityFeedItem[]>([]);
+
+  useEffect(() => { loadProfile(); }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadDmUnread().catch(() => null);
       return undefined;
     }, []),
@@ -105,10 +74,7 @@ export default function Profile() {
 
   async function loadDmUnread() {
     const uid = await getCurrentUserId();
-    if (!uid) {
-      setDmUnread(0);
-      return;
-    }
+    if (!uid) { setDmUnread(0); return; }
     const count = await getTotalDmUnread(uid);
     setDmUnread(count);
   }
@@ -117,103 +83,27 @@ export default function Profile() {
     setLoading(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      setEmail(userData.user?.email ?? '');
+      const userEmail = userData.user?.email ?? '';
+      setEmail(userEmail);
       const uid = userData.user?.id;
       if (!uid) return;
 
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('username, display_name, total_points, streak_count, avatar_url, bio')
-        .eq('id', uid)
-        .maybeSingle<{
-          username: string | null;
-          display_name: string | null;
-          total_points: number;
-          streak_count: number;
-          avatar_url: string | null;
-          bio: string | null;
-        }>();
+      const data = await loadOwnProfileData(uid, userEmail);
 
-      if (profileData) {
-        const nextUsername = profileData.username ?? '';
-        const nextDisplayName = profileData.display_name ?? '';
-        const nextBio = profileData.bio ?? '';
-        setUsername(nextUsername);
-        setDisplayName(nextDisplayName);
-        setAvatarUrl(profileData.avatar_url ?? null);
-        setBio(nextBio);
-        setInitialProfile({
-          displayName: nextDisplayName,
-          username: nextUsername,
-          bio: nextBio,
-        });
-      }
-
-      const { data: attemptsData } = await supabase
-        .from('attempts')
-        .select('id, ms_taken, is_correct, created_at, puzzle_id')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      const allAttempts = attemptsData ?? [];
-      const correctAttempts = allAttempts.filter((a) => a.is_correct);
-      const avgTime =
-        correctAttempts.length > 0
-          ? correctAttempts.reduce((sum, a) => sum + a.ms_taken, 0) / correctAttempts.length
-          : 0;
-      const bestTime =
-        correctAttempts.length > 0
-          ? Math.min(...correctAttempts.map((a) => a.ms_taken))
-          : 0;
-
-      setStats({
-        total_attempts: allAttempts.length,
-        correct_attempts: correctAttempts.length,
-        avg_time: avgTime,
-        best_time: bestTime,
-        streak: profileData?.streak_count ?? 0,
-        total_points: profileData?.total_points ?? 0,
-      });
-
-      if (allAttempts.length > 0) {
-        const puzzleIds = [...new Set(allAttempts.map((a) => a.puzzle_id))];
-        const { data: puzzlesData } = await supabase
-          .from('puzzles')
-          .select('id, title, type')
-          .in('id', puzzleIds);
-
-        const puzzleMap: Record<string, { title: string; type: string }> = {};
-        for (const p of puzzlesData ?? []) {
-          puzzleMap[p.id] = { title: p.title, type: p.type };
-        }
-
-        setRecentAttempts(
-          allAttempts.slice(0, 10).map((a) => ({
-            id: a.id,
-            is_correct: a.is_correct,
-            ms_taken: a.ms_taken,
-            created_at: a.created_at,
-            puzzle_title: puzzleMap[a.puzzle_id]?.title ?? 'Puzzle',
-            puzzle_type: puzzleMap[a.puzzle_id]?.type ?? 'unknown',
-          })),
-        );
-      } else {
-        setRecentAttempts([]);
-      }
-
-      // Load dynamic achievements, level info, and team
-      const [earned, lvlInfo, team] = await Promise.all([
-        getUserAchievements(uid),
-        getCurrentLevelProgress(uid),
-        getUserTeam(uid),
-      ]);
-
-      setBadges(earned.map((e) => e.badge));
-      setEarnedIds(new Set(earned.map((e) => e.badge_id)));
-      setLevelInfo(lvlInfo);
-      setUserTitle(lvlInfo.title);
-      setMyTeam(team);
+      setUsername(data.username);
+      setDisplayName(data.displayName);
+      setBio(data.bio);
+      setAvatarUrl(data.avatarUrl);
+      setInitialProfile({ displayName: data.displayName, username: data.username, bio: data.bio });
+      setStats(data.stats);
+      setRecentAttempts(data.recentAttempts);
+      setBadges(data.badges);
+      setEarnedIds(data.earnedIds);
+      setLevelInfo(data.levelInfo);
+      setUserTitle(data.userTitle);
+      setMyTeam(data.team);
+      setConnectionCount(data.connectionCount);
+      setWinRate(data.winRate);
 
       await loadDmUnread();
     } catch (e: any) {
@@ -223,7 +113,27 @@ export default function Profile() {
     }
   }
 
-  async function pickAvatar() {
+  const handleTabChange = useCallback(async (tab: string) => {
+    const key = tab as ProfileTabKey;
+    setActiveTab(key);
+    if (!loadedTabs.current.has(key)) {
+      loadedTabs.current.add(key);
+      if (key === 'activity') {
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          const uid = userData.user?.id;
+          if (uid) {
+            const feed = await getUserActivity(uid);
+            setActivityFeed(feed);
+          }
+        } catch (e) {
+          console.error('Activity load error:', e);
+        }
+      }
+    }
+  }, []);
+
+  const pickAvatar = useCallback(async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
@@ -231,7 +141,6 @@ export default function Profile() {
         aspect: [1, 1],
         quality: 0.7,
       });
-
       if (result.canceled || !result.assets[0]) return;
 
       setUploadingAvatar(true);
@@ -241,18 +150,13 @@ export default function Profile() {
       if (!uid) throw new Error('Not signed in');
 
       const filePath = `${uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-
       const response = await fetch(asset.uri);
       const blob = await response.blob();
       const arrayBuffer = await new Response(blob).arrayBuffer();
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, arrayBuffer, {
-          contentType: 'image/jpeg',
-          upsert: false,
-        });
-
+        .upload(filePath, arrayBuffer, { contentType: 'image/jpeg', upsert: false });
       if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
 
       const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
@@ -260,14 +164,7 @@ export default function Profile() {
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .upsert(
-          {
-            id: uid,
-            avatar_url: publicUrl,
-          },
-          { onConflict: 'id' },
-        );
-
+        .upsert({ id: uid, avatar_url: publicUrl }, { onConflict: 'id' });
       if (updateError) throw new Error(`Profile update failed: ${updateError.message}`);
 
       setAvatarUrl(publicUrl);
@@ -276,16 +173,13 @@ export default function Profile() {
     } finally {
       setUploadingAvatar(false);
     }
-  }
+  }, []);
 
-  async function save() {
+  const save = useCallback(async () => {
     const trimmedName = displayName.trim();
     const trimmedUsername = username.trim();
     const trimmedBio = bio.trim();
-    if (!trimmedName) {
-      showAlert('Invalid name', 'Display name cannot be empty');
-      return;
-    }
+    if (!trimmedName) { showAlert('Invalid name', 'Display name cannot be empty'); return; }
 
     setSaving(true);
     try {
@@ -299,42 +193,29 @@ export default function Profile() {
         username: trimmedUsername || null,
         bio: trimmedBio || null,
       });
-
       if (error) throw error;
-      setInitialProfile({
-        displayName: trimmedName,
-        username: trimmedUsername,
-        bio: trimmedBio,
-      });
+      setInitialProfile({ displayName: trimmedName, username: trimmedUsername, bio: trimmedBio });
       showAlert('Success', 'Profile updated successfully!');
     } catch (e: any) {
       showAlert('Save failed', e?.message ?? 'Unknown error');
     } finally {
       setSaving(false);
     }
-  }
+  }, [displayName, username, bio]);
 
-  async function signOut() {
+  const signOut = useCallback(async () => {
     const confirmed = await showConfirm('Sign out', 'Are you sure you want to sign out?', 'Sign out');
-    if (confirmed) {
-      await supabase.auth.signOut();
-    }
-  }
+    if (confirmed) await supabase.auth.signOut();
+  }, []);
 
-  async function resetPassword() {
-    if (!email) {
-      showAlert('Error', 'No email found. Please sign in again.');
-      return;
-    }
-
+  const resetPassword = useCallback(async () => {
+    if (!email) { showAlert('Error', 'No email found. Please sign in again.'); return; }
     const confirmed = await showConfirm(
       'Reset Password',
       `We will send a password reset link to ${email}. Continue?`,
       'Send Link',
     );
-
     if (!confirmed) return;
-
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: 'mindarena://reset-password',
@@ -344,893 +225,161 @@ export default function Profile() {
     } catch (e: any) {
       showAlert('Reset Failed', e?.message || 'Could not send reset email.');
     }
-  }
+  }, [email]);
 
-  const accuracy =
-    stats.total_attempts > 0
-      ? Math.round((stats.correct_attempts / stats.total_attempts) * 100)
-      : 0;
+  const hasProfileChanges = useMemo(
+    () =>
+      displayName.trim() !== initialProfile.displayName ||
+      username.trim() !== initialProfile.username ||
+      bio.trim() !== initialProfile.bio,
+    [displayName, username, bio, initialProfile],
+  );
 
-  const initials = displayName
-    ? displayName
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : email[0]?.toUpperCase() || '?';
-  const profileName = displayName || username || 'MindArena Player';
-  const completionScore = [displayName.trim(), username.trim(), bio.trim(), avatarUrl].filter(Boolean).length;
-  const completion = Math.round((completionScore / 4) * 100);
-  const hasProfileChanges =
-    displayName.trim() !== initialProfile.displayName ||
-    username.trim() !== initialProfile.username ||
-    bio.trim() !== initialProfile.bio;
+  const completion = useMemo(() => {
+    const score = [displayName.trim(), username.trim(), bio.trim(), avatarUrl].filter(Boolean).length;
+    return Math.round((score / 4) * 100);
+  }, [displayName, username, bio, avatarUrl]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={styles.backgroundLayer} pointerEvents="none">
+      <View style={styles.bgLayer} pointerEvents="none">
         <View style={[styles.bgOrbTop, { backgroundColor: `${colors.primary}14` }]} />
         <View style={[styles.bgOrbBottom, { backgroundColor: `${colors.secondary}12` }]} />
       </View>
 
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
-        <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-          Identity, progress, and puzzle performance
-        </Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerTextWrap}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
+            <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
+              Identity, progress, and puzzle performance
+            </Text>
+          </View>
+          {levelInfo && (
+            <ProfileShareButton
+              displayName={displayName || 'MindArena Player'}
+              username={username || null}
+              level={levelInfo.level}
+              totalPoints={stats.total_points}
+            />
+          )}
+        </View>
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Card style={styles.heroCard} padding="lg">
-          <View style={[styles.heroBlobOne, { backgroundColor: `${colors.primary}18` }]} />
-          <View style={[styles.heroBlobTwo, { backgroundColor: `${colors.secondary}16` }]} />
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading profile...</Text>
+        </View>
+      ) : (
+        <>
+          <ProfileHeroCard
+            avatarUrl={avatarUrl}
+            displayName={displayName}
+            username={username}
+            email={email}
+            levelInfo={levelInfo}
+            userTitle={userTitle}
+            stats={{ totalPoints: stats.total_points, streak: stats.streak, completion }}
+            team={myTeam}
+            isOwnProfile
+            onAvatarPress={pickAvatar}
+            uploadingAvatar={uploadingAvatar}
+          />
 
-          <View style={styles.heroTopRow}>
-            <Pressable
-              onPress={pickAvatar}
-              disabled={uploadingAvatar}
-              style={({ pressed }) => [
-                styles.avatarWrapper,
-                {
-                  borderColor: `${colors.surface}90`,
-                  transform: [{ scale: pressed ? 0.97 : 1 }],
-                },
-              ]}
-            >
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-              ) : (
-                <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </View>
-              )}
-              <View style={[styles.cameraBadge, { backgroundColor: colors.surface }]}>
-                <Ionicons name="camera" size={16} color={colors.primary} />
-              </View>
-              {uploadingAvatar && (
-                <View style={[styles.avatarOverlay, { backgroundColor: colors.overlay }]}>
-                  <ActivityIndicator color="#fff" />
-                </View>
-              )}
-            </Pressable>
+          <ProfileTabBar tabs={PROFILE_TABS} activeTab={activeTab} onTabChange={handleTabChange} />
 
-            <View style={styles.heroIdentity}>
-              <View
-                style={[
-                  styles.identityPill,
-                  { backgroundColor: `${colors.primary}16`, borderColor: `${colors.primary}35` },
-                ]}
-              >
-                <Ionicons name="sparkles" size={13} color={colors.primary} />
-                <Text style={[styles.identityPillText, { color: colors.primary }]}>
-                  {userTitle ? `Lv.${levelInfo?.level ?? 1} ${userTitle}` : 'Puzzle Challenger'}
-                </Text>
-              </View>
-              <Text style={[styles.heroName, { color: colors.text }]} numberOfLines={1}>
-                {profileName}
-              </Text>
-              <Text style={[styles.email, { color: colors.textSecondary }]} numberOfLines={1}>
-                {email || 'No email connected'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.heroStatsRow}>
-            <HeroStatPill
-              icon="trophy-outline"
-              label="Points"
-              value={String(stats.total_points)}
-              accent={colors.primary}
-              colors={colors}
-            />
-            <HeroStatPill
-              icon="flame-outline"
-              label="Streak"
-              value={String(stats.streak)}
-              accent={colors.warning}
-              colors={colors}
-            />
-            <HeroStatPill
-              icon="checkmark-done-outline"
-              label="Complete"
-              value={`${completion}%`}
-              accent={colors.correct}
-              colors={colors}
-            />
-          </View>
-
-          {levelInfo && (
-            <View style={{ marginTop: spacing.md }}>
-              <XPProgressBar
-                level={levelInfo.level}
-                xp={levelInfo.xp}
-                xpForCurrent={levelInfo.xpForCurrent}
-                xpForNext={levelInfo.xpForNext}
-                progress={levelInfo.progress}
-                title={levelInfo.title}
-                compact
-              />
-            </View>
-          )}
-
-          {myTeam && (
-            <Pressable
-              onPress={() => router.push({ pathname: '/team-detail', params: { id: myTeam.id } })}
-              style={[styles.teamPill, { backgroundColor: `${colors.secondary}15`, borderColor: `${colors.secondary}35` }]}
-            >
-              <Ionicons name="people" size={14} color={colors.secondary} />
-              <Text style={[styles.teamPillText, { color: colors.secondary }]}>{myTeam.name}</Text>
-              <Ionicons name="chevron-forward" size={12} color={colors.secondary} />
-            </Pressable>
-          )}
-        </Card>
-
-        {loading ? (
-          <Card style={styles.loadingCard} padding="lg">
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading profile...</Text>
-          </Card>
-        ) : (
-          <>
-            <Card style={styles.formCard} padding="lg">
-              <SectionHeading
-                icon="person-outline"
-                title="Personal Details"
-                subtitle="Keep your profile up to date"
-                colors={colors}
-              />
-
-              <Input
-                label="Display Name"
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="Enter your display name"
-                autoCapitalize="words"
-                editable={!saving}
-                maxLength={DISPLAY_NAME_MAX}
-                showCharacterCount
-                clearable
-              />
-
-              <Input
-                label="Username"
-                value={username}
-                onChangeText={setUsername}
-                placeholder="Choose a username"
-                autoCapitalize="none"
-                editable={!saving}
-                autoCorrect={false}
-                maxLength={USERNAME_MAX}
-                showCharacterCount
-                clearable
-                helperText="Letters, numbers, hyphens, and underscores only"
-              />
-
-              <Input
-                label="Bio"
-                value={bio}
-                onChangeText={setBio}
-                placeholder="Tell us about yourself"
-                multiline
-                numberOfLines={3}
-                editable={!saving}
-                maxLength={BIO_MAX}
-                showCharacterCount
-                helperText="Optional short intro"
-                style={styles.bioInput}
-              />
-
-              <Button
-                title={saving ? 'Saving...' : 'Save Profile'}
-                onPress={save}
-                disabled={saving || !displayName.trim() || !hasProfileChanges}
-                loading={saving}
-                variant="gradient"
-                fullWidth
-                size="lg"
-                style={styles.saveBtn}
-              />
-            </Card>
-
-            <Card style={styles.statsCard} padding="lg">
-              <Pressable
-                onPress={() => router.push('/chat')}
-                style={[styles.messagesRow, { borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
-              >
-                <View style={styles.messagesLeft}>
-                  <View style={[styles.messagesIcon, { backgroundColor: `${colors.primary}16` }]}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
-                  </View>
-                  <View>
-                    <Text style={[styles.messagesTitle, { color: colors.text }]}>Chat</Text>
-                    <Text style={[styles.messagesHint, { color: colors.textSecondary }]}>Open your DM inbox</Text>
-                  </View>
-                </View>
-                <View style={styles.messagesRight}>
-                  {dmUnread > 0 && (
-                    <View style={[styles.messagesBadge, { backgroundColor: colors.wrong }]}>
-                      <Text style={styles.messagesBadgeText}>{dmUnread > 99 ? '99+' : dmUnread}</Text>
-                    </View>
-                  )}
-                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                </View>
-              </Pressable>
-
-              <SectionHeading
-                icon="stats-chart-outline"
-                title="Your Statistics"
-                subtitle="Performance overview"
-                colors={colors}
-              />
-              <View style={styles.statsGrid}>
-                <StatBox label="Attempts" value={String(stats.total_attempts)} color={colors.primary} colors={colors} />
-                <StatBox label="Correct" value={String(stats.correct_attempts)} color={colors.success} colors={colors} />
-                <StatBox label="Accuracy" value={`${accuracy}%`} color={colors.secondary} colors={colors} />
-                <StatBox
-                  label="Best Time"
-                  value={stats.best_time > 0 ? `${(stats.best_time / 1000).toFixed(1)}s` : '-'}
-                  color={colors.warning}
-                  colors={colors}
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { maxWidth: isDesktop ? 720 : undefined }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {activeTab === 'overview' && (
+              <>
+                <ProfileEditForm
+                  displayName={displayName}
+                  username={username}
+                  bio={bio}
+                  onDisplayNameChange={setDisplayName}
+                  onUsernameChange={setUsername}
+                  onBioChange={setBio}
+                  onSave={save}
+                  saving={saving}
+                  hasChanges={hasProfileChanges}
                 />
-                <StatBox
-                  label="Avg Time"
-                  value={stats.avg_time > 0 ? `${(stats.avg_time / 1000).toFixed(1)}s` : '-'}
-                  color={colors.text}
-                  colors={colors}
+                <ProfileStatsSection
+                  stats={stats}
+                  connectionCount={connectionCount}
+                  winRate={winRate}
+                  isOwnProfile
+                  dmUnread={dmUnread}
+                  onChatPress={() => router.push('/chat')}
                 />
-              </View>
-            </Card>
-
-            <Card style={styles.achievementsCard} padding="lg">
-              <SectionHeading
-                icon="ribbon-outline"
-                title="Achievements"
-                subtitle={`${earnedIds.size} badge${earnedIds.size !== 1 ? 's' : ''} earned`}
-                colors={colors}
-              />
-              {badges.length > 0 ? (
-                <BadgeGrid badges={badges} earnedIds={earnedIds} />
-              ) : (
-                <View style={styles.emptyWrap}>
-                  <Ionicons name="ribbon-outline" size={20} color={colors.textTertiary} />
-                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                    No badges earned yet. Keep solving puzzles!
-                  </Text>
-                </View>
-              )}
-              <Pressable
-                onPress={() => router.push('/badges')}
-                style={[styles.viewAllRow, { borderTopColor: colors.border }]}
-              >
-                <Text style={[styles.viewAllText, { color: colors.primary }]}>View All Badges</Text>
-                <Ionicons name="chevron-forward" size={14} color={colors.primary} />
-              </Pressable>
-            </Card>
-
-            <Card style={styles.historyCard} padding="lg">
-              <SectionHeading
-                icon="time-outline"
-                title="Recent Puzzles"
-                subtitle="Your latest attempts"
-                colors={colors}
-              />
-              {recentAttempts.length === 0 ? (
-                <View style={styles.emptyWrap}>
-                  <Ionicons name="hourglass-outline" size={20} color={colors.textTertiary} />
-                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                    No puzzle attempts yet. Solve your first puzzle!
-                  </Text>
-                </View>
-              ) : (
-                recentAttempts.map((attempt) => (
-                  <View
-                    key={attempt.id}
-                    style={[
-                      styles.historyRow,
-                      { borderColor: colors.border, backgroundColor: colors.surfaceVariant },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.historyIndicator,
-                        { backgroundColor: attempt.is_correct ? colors.correct : colors.wrong },
-                      ]}
-                    />
-                    <View style={styles.historyInfo}>
-                      <Text style={[styles.historyTitle, { color: colors.text }]} numberOfLines={1}>
-                        {attempt.puzzle_title}
-                      </Text>
-                      <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>
-                        {new Date(attempt.created_at).toLocaleDateString()} - {(attempt.ms_taken / 1000).toFixed(1)}s
-                      </Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.resultPill,
-                        {
-                          backgroundColor: attempt.is_correct ? `${colors.correct}15` : `${colors.wrong}15`,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.historyResult,
-                          { color: attempt.is_correct ? colors.correct : colors.wrong },
-                        ]}
-                      >
-                        {attempt.is_correct ? 'Correct' : 'Wrong'}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
-            </Card>
-
-            <Card style={styles.settingsCard} padding="lg">
-              <SectionHeading
-                icon="color-palette-outline"
-                title="Appearance"
-                subtitle="Theme mode and accent palette"
-                colors={colors}
-              />
-
-              <View style={styles.modeGrid}>
-                {modeOptions.map((option) => {
-                  const active = theme === option.key;
-                  return (
-                    <Pressable
-                      key={option.key}
-                      style={[
-                        styles.modeOption,
-                        {
-                          borderColor: active ? `${colors.primary}50` : colors.border,
-                          backgroundColor: active ? `${colors.primary}12` : colors.surface,
-                        },
-                      ]}
-                      onPress={() => setTheme(option.key)}
-                    >
-                      <Ionicons
-                        name={option.icon}
-                        size={18}
-                        color={active ? colors.primary : colors.textSecondary}
-                      />
-                      <Text style={[styles.modeLabel, { color: active ? colors.primary : colors.text }]}>
-                        {option.label}
-                      </Text>
-                      <Text
-                        style={[styles.modeHint, { color: active ? colors.primary : colors.textSecondary }]}
-                      >
-                        {option.hint}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text style={[styles.paletteLabel, { color: colors.textSecondary }]}>Accent theme</Text>
-              <ThemePicker />
-            </Card>
-
-            <Card style={styles.settingsCard} padding="lg">
-              <SectionHeading
-                icon="notifications-outline"
-                title="Notifications"
-                subtitle="Get reminded for daily challenges"
-                colors={colors}
-              />
-
-              <View style={[styles.switchRow, { borderColor: colors.border }]}>
-                <View style={styles.switchLabelWrap}>
-                  <Text style={[styles.switchTitle, { color: colors.text }]}>Daily puzzle reminder</Text>
-                  <Text style={[styles.switchSubtitle, { color: colors.textSecondary }]}>
-                    Receive a prompt when a new puzzle is live.
-                  </Text>
-                </View>
-                <Switch
-                  value={notificationsEnabled}
-                  onValueChange={setNotificationsEnabled}
-                  trackColor={{ false: colors.border, true: `${colors.primary}55` }}
-                  thumbColor={notificationsEnabled ? colors.primary : colors.textTertiary}
+                <ProfileAchievementsSection
+                  badges={badges}
+                  earnedIds={earnedIds}
+                  isOwnProfile
+                  onViewAll={() => router.push('/badges')}
                 />
-              </View>
-            </Card>
+              </>
+            )}
 
-            <Card style={styles.settingsCard} padding="lg">
-              <SectionHeading
-                icon="shield-checkmark-outline"
-                title="Account & Security"
-                subtitle="Credentials and session controls"
-                colors={colors}
+            {activeTab === 'activity' && (
+              <ProfileActivitySection
+                recentAttempts={recentAttempts}
+                activityFeed={activityFeed}
+                isOwnProfile
               />
+            )}
 
-              {email ? (
-                <View style={[styles.emailPill, { backgroundColor: colors.surfaceVariant }]}>
-                  <Ionicons name="mail-outline" size={14} color={colors.textSecondary} />
-                  <Text style={[styles.emailPillText, { color: colors.textSecondary }]}>{email}</Text>
-                </View>
-              ) : null}
-
-              <Button title="Reset Password" onPress={resetPassword} variant="outline" fullWidth size="lg" />
-              <Button
-                title="Sign Out"
-                onPress={signOut}
-                variant="outline"
-                fullWidth
-                size="lg"
-                style={{ marginTop: spacing.sm }}
+            {activeTab === 'settings' && (
+              <ProfileSettingsSection
+                theme={theme}
+                setTheme={setTheme}
+                notificationsEnabled={notificationsEnabled}
+                setNotificationsEnabled={setNotificationsEnabled}
+                email={email}
+                onResetPassword={resetPassword}
+                onSignOut={signOut}
               />
-            </Card>
+            )}
 
-            <Card style={styles.settingsCard} padding="lg">
-              <SectionHeading
-                icon="help-buoy-outline"
-                title="Help & About"
-                subtitle="Support resources and app details"
-                colors={colors}
-              />
-
-              <Pressable
-                style={[styles.linkRow, { borderBottomColor: colors.border }]}
-                onPress={() => showAlert('Coming Soon', 'FAQ section is under development.')}
-              >
-                <View style={styles.linkLeft}>
-                  <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
-                  <Text style={[styles.linkText, { color: colors.text }]}>FAQ</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </Pressable>
-
-              <Pressable
-                style={[styles.linkRow, { borderBottomColor: colors.border }]}
-                onPress={() => showAlert('Coming Soon', 'Contact support is under development.')}
-              >
-                <View style={styles.linkLeft}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textSecondary} />
-                  <Text style={[styles.linkText, { color: colors.text }]}>Contact Support</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-              </Pressable>
-
-              <View style={styles.aboutGrid}>
-                <View style={[styles.aboutPill, { backgroundColor: colors.surfaceVariant }]}>
-                  <Text style={[styles.aboutLabel, { color: colors.textSecondary }]}>Version</Text>
-                  <Text style={[styles.aboutValue, { color: colors.text }]}>1.0.0</Text>
-                </View>
-                <View style={[styles.aboutPill, { backgroundColor: colors.surfaceVariant }]}>
-                  <Text style={[styles.aboutLabel, { color: colors.textSecondary }]}>Team</Text>
-                  <Text style={[styles.aboutValue, { color: colors.text }]}>MindArena</Text>
-                </View>
-              </View>
-            </Card>
-          </>
-        )}
-
-        <View style={{ height: spacing.xl }} />
-      </ScrollView>
+            <View style={{ height: spacing.xl }} />
+          </ScrollView>
+        </>
+      )}
     </SafeAreaView>
   );
 }
 
-function SectionHeading({
-  icon,
-  title,
-  subtitle,
-  colors,
-}: {
-  icon: IconName;
-  title: string;
-  subtitle: string;
-  colors: any;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <View style={[styles.sectionIconWrap, { backgroundColor: `${colors.primary}12` }]}>
-        <Ionicons name={icon} size={16} color={colors.primary} />
-      </View>
-      <View style={styles.sectionHeaderText}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
-        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
-      </View>
-    </View>
-  );
-}
-
-function HeroStatPill({
-  icon,
-  value,
-  label,
-  accent,
-  colors,
-}: {
-  icon: IconName;
-  value: string;
-  label: string;
-  accent: string;
-  colors: any;
-}) {
-  return (
-    <View style={[styles.heroStat, { borderColor: `${accent}30`, backgroundColor: `${colors.surface}95` }]}>
-      <View style={[styles.heroStatIcon, { backgroundColor: `${accent}15` }]}>
-        <Ionicons name={icon} size={14} color={accent} />
-      </View>
-      <Text style={[styles.heroStatValue, { color: accent }]}>{value}</Text>
-      <Text style={[styles.heroStatLabel, { color: colors.textSecondary }]}>{label}</Text>
-    </View>
-  );
-}
-
-function StatBox({
-  label,
-  value,
-  color,
-  colors,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  colors: any;
-}) {
-  return (
-    <View style={[statStyles.box, { backgroundColor: colors.surfaceVariant, borderColor: `${color}28` }]}>
-      <View style={[statStyles.dot, { backgroundColor: color }]} />
-      <Text style={[statStyles.value, { color }]}>{value}</Text>
-      <Text style={[statStyles.label, { color: colors.textSecondary }]}>{label}</Text>
-    </View>
-  );
-}
-
-const statStyles = StyleSheet.create({
-  box: {
-    flex: 1,
-    minWidth: 100,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  dot: { width: 8, height: 8, borderRadius: borderRadius.full, marginBottom: spacing.xs },
-  value: { fontSize: fontSize.xl, fontWeight: fontWeight.black, marginBottom: 2 },
-  label: { fontSize: fontSize.xs, fontWeight: fontWeight.medium, textAlign: 'center' },
-});
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  backgroundLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  bgLayer: { ...StyleSheet.absoluteFillObject },
   bgOrbTop: {
-    position: 'absolute',
-    top: -120,
-    right: -90,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
+    position: 'absolute', top: -120, right: -90, width: 260, height: 260, borderRadius: 130,
   },
   bgOrbBottom: {
-    position: 'absolute',
-    bottom: 120,
-    left: -110,
-    width: 220,
-    height: 220,
-    borderRadius: 110,
+    position: 'absolute', bottom: 120, left: -110, width: 220, height: 220, borderRadius: 110,
   },
-
   header: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderBottomWidth: 1,
-    alignItems: 'center',
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTextWrap: { flex: 1 },
   headerTitle: { fontSize: fontSize.xl, fontWeight: fontWeight.black },
   headerSubtitle: { fontSize: fontSize.xs, marginTop: 2 },
-
-  scroll: { flex: 1 },
-  scrollContent: { padding: spacing.md, alignSelf: 'center', width: '100%', paddingBottom: spacing.xl },
-
-  heroCard: {
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  heroBlobOne: {
-    position: 'absolute',
-    top: -36,
-    right: -24,
-    width: 132,
-    height: 132,
-    borderRadius: 66,
-  },
-  heroBlobTwo: {
-    position: 'absolute',
-    bottom: -56,
-    left: -34,
-    width: 156,
-    height: 156,
-    borderRadius: 78,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  avatarWrapper: {
-    width: 104,
-    height: 104,
-    borderRadius: borderRadius.full,
-    overflow: 'hidden',
-    borderWidth: 3,
-  },
-  avatarImage: {
-    width: 104,
-    height: 104,
-    borderRadius: borderRadius.full,
-  },
-  avatar: {
-    width: 104,
-    height: 104,
-    borderRadius: borderRadius.full,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: { fontSize: fontSize['3xl'], fontWeight: fontWeight.black, color: '#fff' },
-  avatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: borderRadius.full,
-  },
-  cameraBadge: {
-    position: 'absolute',
-    right: 2,
-    bottom: 2,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroIdentity: { flex: 1, minWidth: 0 },
-  identityPill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    marginBottom: spacing.sm,
-  },
-  identityPillText: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
-  heroName: { fontSize: fontSize['2xl'], fontWeight: fontWeight.black },
-  email: { fontSize: fontSize.sm, marginTop: 2 },
-
-  heroStatsRow: { flexDirection: 'row', gap: spacing.sm },
-  heroStat: {
-    flex: 1,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
-  },
-  heroStatIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.xs,
-  },
-  heroStatValue: { fontSize: fontSize.base, fontWeight: fontWeight.black },
-  heroStatLabel: { fontSize: fontSize.xs, marginTop: 2 },
-
-  loadingCard: {
-    marginBottom: spacing.md,
-    alignItems: 'center',
-    gap: spacing.sm,
+  loadingWrap: {
+    flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm,
   },
   loadingText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
-
-  formCard: {
-    marginBottom: spacing.md,
+  scroll: { flex: 1 },
+  scrollContent: {
+    padding: spacing.md, alignSelf: 'center', width: '100%', paddingBottom: spacing.xl,
   },
-  bioInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  saveBtn: { marginTop: spacing.sm },
-
-  statsCard: { marginBottom: spacing.md },
-  messagesRow: {
-    borderWidth: 1,
-    borderRadius: borderRadius.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  messagesLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1 },
-  messagesIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  messagesTitle: { fontSize: fontSize.base, fontWeight: fontWeight.bold },
-  messagesHint: { fontSize: fontSize.xs, marginTop: 2 },
-  messagesRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  messagesBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  messagesBadgeText: { color: '#fff', fontSize: 11, fontWeight: fontWeight.bold },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  sectionIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionHeaderText: { flex: 1 },
-  sectionTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.black },
-  sectionSubtitle: { fontSize: fontSize.xs, marginTop: 2 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-
-  achievementsCard: { marginBottom: spacing.md },
-  viewAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-  },
-  viewAllText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-  teamPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    marginTop: spacing.sm,
-    alignSelf: 'flex-start',
-  },
-  teamPillText: { fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-
-  historyCard: { marginBottom: spacing.md },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.lg, gap: spacing.xs },
-  emptyText: { fontSize: fontSize.base, textAlign: 'center' },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  historyIndicator: {
-    width: 9,
-    height: 9,
-    borderRadius: borderRadius.full,
-  },
-  historyInfo: { flex: 1, minWidth: 0 },
-  historyTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
-  historyMeta: { fontSize: fontSize.xs, marginTop: 2 },
-  resultPill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.full,
-  },
-  historyResult: { fontSize: fontSize.xs, fontWeight: fontWeight.bold },
-
-  settingsCard: { marginBottom: spacing.md },
-  modeGrid: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  modeOption: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.sm,
-    alignItems: 'center',
-  },
-  modeLabel: { marginTop: 4, fontSize: fontSize.sm, fontWeight: fontWeight.bold },
-  modeHint: { fontSize: fontSize.xs, marginTop: 2 },
-  paletteLabel: {
-    fontSize: fontSize.sm,
-    marginBottom: spacing.sm,
-    fontWeight: fontWeight.semibold,
-  },
-  switchRow: {
-    borderWidth: 1,
-    borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  switchLabelWrap: { flex: 1 },
-  switchTitle: { fontSize: fontSize.base, fontWeight: fontWeight.semibold },
-  switchSubtitle: { fontSize: fontSize.sm, marginTop: 2 },
-  emailPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.md,
-    alignSelf: 'flex-start',
-  },
-  emailPillText: { fontSize: fontSize.sm },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-  },
-  linkLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  linkText: { fontSize: fontSize.base, fontWeight: fontWeight.medium },
-  aboutGrid: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  aboutPill: {
-    flex: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-  },
-  aboutLabel: { fontSize: fontSize.xs },
-  aboutValue: { fontSize: fontSize.base, fontWeight: fontWeight.bold, marginTop: 2 },
 });
