@@ -146,6 +146,7 @@ const InBubbleMeta = React.memo(function InBubbleMeta({
   isDeleted,
   status,
   overlay,
+  unencrypted,
 }: {
   timeStr: string;
   isOwn: boolean;
@@ -153,11 +154,15 @@ const InBubbleMeta = React.memo(function InBubbleMeta({
   isDeleted: boolean;
   status?: DmMessageStatus;
   overlay?: boolean;
+  unencrypted?: boolean;
 }) {
   const metaColor = overlay ? 'rgba(255,255,255,0.85)' : '#8696a0';
 
   return (
     <View style={[styles.inBubbleMeta, overlay && styles.inBubbleMetaOverlay]}>
+      {unencrypted && (
+        <Ionicons name="lock-open-outline" size={10} color="#e74c3c" style={{ marginRight: 2 }} />
+      )}
       {isEdited && !isDeleted && (
         <Text style={[styles.editedLabel, { color: metaColor }]}>edited</Text>
       )}
@@ -461,6 +466,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const msgType = item.message_type ?? 'text';
   const isDeleted = item.is_deleted === true;
   const isEdited = !isDeleted && !!item.edited_at;
+  const isUnencrypted = item._unencrypted === true;
   const timeStr = new Date(item.created_at).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
@@ -638,6 +644,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             isEdited={false}
             isDeleted
             status={item.status}
+            unencrypted={isUnencrypted}
           />
         </View>
       );
@@ -660,6 +667,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               isEdited={isEdited}
               isDeleted={false}
               status={item.status}
+              unencrypted={isUnencrypted}
             />
           </View>
         );
@@ -689,6 +697,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                   isDeleted={false}
                   status={item.status}
                   overlay
+                  unencrypted={isUnencrypted}
                 />
               )}
             </View>
@@ -702,6 +711,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 isEdited={isEdited}
                 isDeleted={false}
                 status={item.status}
+                unencrypted={isUnencrypted}
               />
             </View>
           ) : null}
@@ -724,6 +734,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             isEdited={isEdited}
             isDeleted={false}
             status={item.status}
+            unencrypted={isUnencrypted}
           />
         </View>
       );
@@ -746,6 +757,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               isDeleted={false}
               status={item.status}
               overlay
+              unencrypted={isUnencrypted}
             />
           </Pressable>
           {item.body ? (
@@ -786,6 +798,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             isEdited={isEdited}
             isDeleted={false}
             status={item.status}
+            unencrypted={isUnencrypted}
           />
         </View>
       );
@@ -808,6 +821,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             isEdited={isEdited}
             isDeleted={false}
             status={item.status}
+            unencrypted={isUnencrypted}
           />
         </Animated.View>
       );
@@ -825,6 +839,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           isEdited={isEdited}
           isDeleted={false}
           status={item.status}
+          unencrypted={isUnencrypted}
         />
       </View>
     );

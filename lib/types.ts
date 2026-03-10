@@ -91,6 +91,8 @@ export interface DmMessage {
   is_deleted?: boolean;
   pinned_at?: string | null;
   pinned_by?: string | null;
+  /** Client-side flag: true when E2EE was enabled but encryption failed for this message. */
+  _unencrypted?: boolean;
 }
 
 export interface DmReaction {

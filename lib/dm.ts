@@ -303,6 +303,7 @@ export async function sendMessage(conversationId: string, body: string, replyToI
   if (blocked) throw new Error('Cannot send message — user is blocked');
 
   let messageBody = text;
+  let wasEncrypted = false;
   if (canEncrypt) {
     try {
       messageBody = await encryptDmMessageBody({
@@ -312,9 +313,10 @@ export async function sendMessage(conversationId: string, body: string, replyToI
         body: text,
         forceRefreshPeerKey: true,
       });
+      wasEncrypted = true;
     } catch (error) {
       if (!isPeerE2eeNotReadyError(error)) {
-        console.warn('DM encrypt failed; falling back to plaintext', error);
+        console.warn('[E2EE] encrypt failed; falling back to plaintext', error);
       }
       // Compatibility path: allow plaintext messages when E2EE is not available.
       messageBody = text;
@@ -337,6 +339,7 @@ export async function sendMessage(conversationId: string, body: string, replyToI
   return {
     ...data,
     body: text,
+    _unencrypted: DM_E2EE_ENABLED && !wasEncrypted,
   };
 }
 

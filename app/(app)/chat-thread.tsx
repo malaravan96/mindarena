@@ -1,5 +1,10 @@
 import { ChatThreadScreen } from '@/components/chat/ChatThreadScreen';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 
 export default function ChatThreadRoute() {
-  return <ChatThreadScreen />;
+  return (
+    <ErrorBoundary>
+      <ChatThreadScreen />
+    </ErrorBoundary>
+  );
 }

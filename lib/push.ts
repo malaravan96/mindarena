@@ -52,30 +52,51 @@ export async function upsertCurrentUserPushToken() {
   const token = await registerForPushNotifications();
   if (!token) return null;
 
-  const { error } = await supabase.from('user_push_tokens').upsert(
-    {
-      user_id: userId,
-      expo_push_token: token,
-      platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web',
-    },
-    { onConflict: 'user_id,expo_push_token' },
-  );
+  const payload = {
+    user_id: userId,
+    expo_push_token: token,
+    platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web',
+  };
+
+  const { error } = await supabase
+    .from('user_push_tokens')
+    .upsert(payload, { onConflict: 'user_id,expo_push_token' });
 
   if (error) {
-    return null;
+    console.error('[Push] upsertCurrentUserPushToken failed, retrying once...', error.message);
+    // Retry once after 2 seconds
+    await new Promise((r) => setTimeout(r, 2000));
+    const { error: retryError } = await supabase
+      .from('user_push_tokens')
+      .upsert(payload, { onConflict: 'user_id,expo_push_token' });
+    if (retryError) {
+      console.error('[Push] upsertCurrentUserPushToken retry failed', retryError.message);
+      return null;
+    }
   }
 
   return token;
 }
 
+async function invokeWithRetry(fnName: string, body: Record<string, unknown>) {
+  const { error } = await supabase.functions.invoke(fnName, { body });
+  if (error) {
+    console.error(`[Push] ${fnName} failed, retrying once...`, error.message);
+    await new Promise((r) => setTimeout(r, 2000));
+    const { error: retryError } = await supabase.functions.invoke(fnName, { body });
+    if (retryError) {
+      console.error(`[Push] ${fnName} retry failed`, retryError.message);
+      throw retryError;
+    }
+  }
+}
+
 export async function notifyIncomingMatchCall(matchId: string, calleeId: string, callerName: string) {
   if (!matchId || !calleeId || !callerName) return;
-  await supabase.functions.invoke('notify-incoming-match-call', {
-    body: {
-      match_id: matchId,
-      callee_id: calleeId,
-      caller_name: callerName,
-    },
+  await invokeWithRetry('notify-incoming-match-call', {
+    match_id: matchId,
+    callee_id: calleeId,
+    caller_name: callerName,
   });
 }
 
@@ -86,13 +107,10 @@ export async function notifyIncomingDmCall(
   mode: 'audio' | 'video',
 ) {
   if (!conversationId || !calleeId || !callerName || !mode) return;
-  const { error } = await supabase.functions.invoke('notify-incoming-dm-call', {
-    body: {
-      conversation_id: conversationId,
-      callee_id: calleeId,
-      caller_name: callerName,
-      mode,
-    },
+  await invokeWithRetry('notify-incoming-dm-call', {
+    conversation_id: conversationId,
+    callee_id: calleeId,
+    caller_name: callerName,
+    mode,
   });
-  if (error) throw error;
 }

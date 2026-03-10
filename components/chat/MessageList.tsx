@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, fontSize, fontWeight, borderRadius } from '@/constants/theme';
 import { DateSeparator } from '@/components/chat/DateSeparator';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import type { DmMessage, DmReactionGroup } from '@/lib/types';
 
 type ListItem =
@@ -137,11 +138,15 @@ export function MessageList({
       if (item.type === 'date') {
         return <DateSeparator date={item.date} />;
       }
-      return renderMessageItem({
-        item: item.message,
-        isFirstInGroup: item.isFirstInGroup,
-        isLastInGroup: item.isLastInGroup,
-      });
+      return (
+        <ErrorBoundary compact>
+          {renderMessageItem({
+            item: item.message,
+            isFirstInGroup: item.isFirstInGroup,
+            isLastInGroup: item.isLastInGroup,
+          })}
+        </ErrorBoundary>
+      );
     },
     [renderMessageItem],
   );
