@@ -3,10 +3,7 @@ const {
   withInfoPlist,
   withMainActivity,
   withMainApplication,
-  withDangerousMod,
 } = require("expo/config-plugins");
-const fs = require("fs");
-const path = require("path");
 
 // ─── Android Manifest ───────────────────────────────────────────────────────
 
@@ -171,47 +168,6 @@ function withPiPMainApplication(config) {
 
 // ─── Android: Copy native Kotlin source files ───────────────────────────────
 
-function withPiPAndroidNativeFiles(config) {
-  return withDangerousMod(config, [
-    "android",
-    (cfg) => {
-      const projectRoot = cfg.modRequest.projectRoot;
-      const srcDir = path.join(
-        projectRoot,
-        "modules",
-        "pip",
-        "android",
-        "src",
-        "main",
-        "java",
-        "com",
-        "mindarena",
-        "pip"
-      );
-      const destDir = path.join(
-        cfg.modRequest.platformProjectRoot,
-        "app",
-        "src",
-        "main",
-        "java",
-        "com",
-        "mindarena",
-        "pip"
-      );
-
-      if (fs.existsSync(srcDir)) {
-        fs.mkdirSync(destDir, { recursive: true });
-        const files = fs.readdirSync(srcDir).filter((f) => f.endsWith(".kt"));
-        for (const file of files) {
-          fs.copyFileSync(path.join(srcDir, file), path.join(destDir, file));
-        }
-      }
-
-      return cfg;
-    },
-  ]);
-}
-
 // ─── iOS: Info.plist background modes ───────────────────────────────────────
 
 function withPiPInfoPlist(config) {
@@ -232,42 +188,13 @@ function withPiPInfoPlist(config) {
 
 // ─── iOS: Copy native Swift source files ────────────────────────────────────
 
-function withPiPiOSNativeFiles(config) {
-  return withDangerousMod(config, [
-    "ios",
-    (cfg) => {
-      const projectRoot = cfg.modRequest.projectRoot;
-      const srcDir = path.join(projectRoot, "modules", "pip", "ios");
-      const destDir = path.join(
-        cfg.modRequest.platformProjectRoot,
-        "MindArena",
-        "PiP"
-      );
-
-      if (fs.existsSync(srcDir)) {
-        fs.mkdirSync(destDir, { recursive: true });
-        const files = fs
-          .readdirSync(srcDir)
-          .filter((f) => f.endsWith(".swift") || f.endsWith(".m"));
-        for (const file of files) {
-          fs.copyFileSync(path.join(srcDir, file), path.join(destDir, file));
-        }
-      }
-
-      return cfg;
-    },
-  ]);
-}
-
 // ─── Combined plugin ────────────────────────────────────────────────────────
 
 function withPiP(config) {
   config = withPiPAndroidManifest(config);
   config = withPiPMainActivity(config);
   config = withPiPMainApplication(config);
-  config = withPiPAndroidNativeFiles(config);
   config = withPiPInfoPlist(config);
-  config = withPiPiOSNativeFiles(config);
   return config;
 }
 

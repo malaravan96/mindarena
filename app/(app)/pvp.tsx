@@ -16,10 +16,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams } from 'expo-router';
-import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase';
 import { offlinePuzzles, Puzzle } from '@/lib/puzzles';
 import { getItem, setItem } from '@/lib/storage';
+import { randomUuid } from '@/lib/nativeCrypto';
 import { notifyIncomingMatchCall } from '@/lib/push';
 import { setSpeaker, startCallAudio, stopCallAudio } from '@/lib/audioRoute';
 import { PvpWebRTCCall } from '@/lib/webrtcCall';
@@ -912,7 +912,7 @@ export default function PvpScreen() {
 
     resetChatState();
     const puzzleIndex = Math.floor(Math.random() * offlinePuzzles.length);
-    const newMatchId = Crypto.randomUUID();
+    const newMatchId = randomUuid();
 
     setInvitedPlayer(player);
     setOpponentName(player.username);

@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import * as Notifications from 'expo-notifications';
 import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { upsertCurrentUserPushToken } from '@/lib/push';
 import { trackPresence } from '@/lib/presence';
+import { loadNotificationsModule } from '@/lib/optionalNotifications';
 import { getCurrentUserId } from '@/lib/dm';
 import { CallProvider } from '@/contexts/CallContext';
 import { GlobalNotificationsProvider, useGlobalNotifications } from '@/contexts/GlobalNotificationsContext';
@@ -88,6 +88,7 @@ function AppLayoutContent() {
 
   useEffect(() => {
     let mounted = true;
+    let removeListener: (() => void) | null = null;
 
     const routeFromPayload = (raw: unknown) => {
       const data = raw as NotificationPayload | null | undefined;
@@ -118,20 +119,27 @@ function AppLayoutContent() {
       }
     };
 
-    Notifications.getLastNotificationResponseAsync()
-      .then((response) => {
-        if (!mounted || !response) return;
-        routeFromPayload(response.notification.request.content.data);
+    loadNotificationsModule()
+      .then((Notifications) => {
+        if (!mounted || !Notifications) return;
+
+        Notifications.getLastNotificationResponseAsync()
+          .then((response) => {
+            if (!mounted || !response) return;
+            routeFromPayload(response.notification.request.content.data);
+          })
+          .catch(() => null);
+
+        const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+          routeFromPayload(response.notification.request.content.data);
+        });
+        removeListener = () => sub.remove();
       })
       .catch(() => null);
 
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      routeFromPayload(response.notification.request.content.data);
-    });
-
     return () => {
       mounted = false;
-      sub.remove();
+      removeListener?.();
     };
   }, [router]);
 

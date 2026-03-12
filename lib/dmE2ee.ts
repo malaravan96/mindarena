@@ -1,6 +1,6 @@
-import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import * as nacl from 'tweetnacl';
+import { getRandomBytes } from '@/lib/nativeCrypto';
 import { supabase } from '@/lib/supabase';
 
 const ENVELOPE_PREFIX = 'e2ee:v1';
@@ -72,13 +72,6 @@ async function isSecureStoreAvailable() {
   if (secureStoreAvailable !== null) return secureStoreAvailable;
   secureStoreAvailable = await SecureStore.isAvailableAsync();
   return secureStoreAvailable;
-}
-
-async function getRandomBytes(length: number) {
-  if (typeof Crypto.getRandomBytes === 'function') {
-    return Crypto.getRandomBytes(length);
-  }
-  return await Crypto.getRandomBytesAsync(length);
 }
 
 function secureKeyForUser(userId: string) {
@@ -153,7 +146,7 @@ async function ensureLocalKeyPair(userId: string): Promise<LocalKeyPair> {
       return stored;
     }
 
-    const seed = await getRandomBytes(nacl.box.secretKeyLength);
+    const seed = getRandomBytes(nacl.box.secretKeyLength);
     const seed32 = seed.slice(0, nacl.box.secretKeyLength);
     const pair = nacl.box.keyPair.fromSecretKey(seed32);
     const next = { publicKey: pair.publicKey, secretKey: pair.secretKey };
@@ -238,7 +231,7 @@ export async function encryptDmMessageBody(params: {
   const key = await deriveConversationKey(params.conversationId, params.userId, params.peerId, {
     forceRefreshPeerKey: params.forceRefreshPeerKey,
   });
-  const nonce = await getRandomBytes(nacl.secretbox.nonceLength);
+  const nonce = getRandomBytes(nacl.secretbox.nonceLength);
   const cipher = nacl.secretbox(encoder.encode(params.body), nonce, key);
   return `${ENVELOPE_PREFIX}:${toHex(nonce)}:${toHex(cipher)}`;
 }

@@ -1,12 +1,14 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import { loadNotificationsModule } from '@/lib/optionalNotifications';
 import { supabase } from '@/lib/supabase';
 
 export async function registerForPushNotifications() {
   if ((Platform as any).OS === 'web') return null;
   if (!Device.isDevice) return null;
+  const Notifications = await loadNotificationsModule();
+  if (!Notifications) return null;
 
   let finalStatus = (await Notifications.getPermissionsAsync()).status;
   if (finalStatus !== 'granted') {

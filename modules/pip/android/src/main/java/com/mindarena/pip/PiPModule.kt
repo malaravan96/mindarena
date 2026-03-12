@@ -106,7 +106,7 @@ class PiPModule(react: ReactApplicationContext) : ReactContextBaseJavaModule(rea
     }
 
     private fun getActivity(): Activity? {
-        return reactApplicationContext.currentActivity as? Activity
+        return getCurrentActivity()
     }
 
     @ReactMethod

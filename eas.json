@@ -1,15 +1,25 @@
 {
     "build": {
         "development": {
+            "env": {
+                "APP_VARIANT": "development"
+            },
             "developmentClient": true,
             "distribution": "internal"
         },
         "preview": {
+            "env": {
+                "APP_VARIANT": "preview"
+            },
             "distribution": "internal",
             "android": {
                 "buildType": "apk"
             }
         },
-        "production": {}
+        "production": {
+            "env": {
+                "APP_VARIANT": "production"
+            }
+        }
     }
 }
