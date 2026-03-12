@@ -5,6 +5,7 @@ android/build/
 android/app/build/
 android/app/.cxx/
 android/local.properties
+modules/pip/android/build/
 
 # Firebase credentials (NEVER commit these)
 google-services.json
