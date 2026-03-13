@@ -25,7 +25,11 @@
       "Bash(npx tsx scripts/generate-emoji-map.ts)",
       "Bash(npm uninstall @react-native-async-storage/async-storage)",
       "Bash(cat \"c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\(app\\)/profile.tsx\")",
-      "Bash(wc -l c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/profile.tsx c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/player-profile.tsx)"
+      "Bash(wc -l c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/profile.tsx c:/Users/Malar/Desktop/mindarena-mvp/mindarena/app/\\\\\\(app\\\\\\)/player-profile.tsx)",
+      "WebFetch(domain:expo.dev)",
+      "Bash(npx eas:*)",
+      "WebFetch(domain:job-logs.eascdn.net)",
+      "Bash(node -e \"const p = require\\(''./plugins/withPiP''\\); console.log\\(typeof p, ''OK''\\)\")"
     ],
     "deny": [],
     "ask": []

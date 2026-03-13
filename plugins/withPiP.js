@@ -1,9 +1,12 @@
 const {
   withAndroidManifest,
+  withDangerousMod,
   withInfoPlist,
   withMainActivity,
   withMainApplication,
 } = require("expo/config-plugins");
+const fs = require("fs");
+const path = require("path");
 
 // ─── Android Manifest ───────────────────────────────────────────────────────
 
@@ -166,7 +169,212 @@ function withPiPMainApplication(config) {
   });
 }
 
-// ─── Android: Copy native Kotlin source files ───────────────────────────────
+// ─── Android: Write native Kotlin source files ──────────────────────────────
+
+const PIP_MODULE_KT = `package com.mindarena.pip
+
+import android.app.Activity
+import android.app.PictureInPictureParams
+import android.os.Build
+import android.util.Rational
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.modules.core.DeviceEventManagerModule
+
+class PiPModule(reactContext: ReactApplicationContext) :
+    ReactContextBaseJavaModule(reactContext) {
+
+    override fun getName(): String = NAME
+
+    @ReactMethod
+    fun enterPiP() {
+        val activity = currentActivity ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build()
+            activity.enterPictureInPictureMode(params)
+        }
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String?) {}
+
+    @ReactMethod
+    fun removeListeners(count: Int) {}
+
+    companion object {
+        const val NAME = "PiPModule"
+        private var pipEnabled = false
+        private var reactContext: ReactApplicationContext? = null
+
+        fun setReactContext(context: ReactApplicationContext) {
+            reactContext = context
+        }
+
+        fun setPiPEnabled(enabled: Boolean) {
+            pipEnabled = enabled
+        }
+
+        fun onUserLeaveHint(activity: Activity) {
+            if (!pipEnabled) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+                try {
+                    activity.enterPictureInPictureMode(params)
+                } catch (e: Exception) {
+                    // PiP not available
+                }
+            }
+        }
+
+        fun onPiPModeChanged(isInPiPMode: Boolean) {
+            reactContext
+                ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit("onPiPModeChanged", isInPiPMode)
+        }
+    }
+}
+`;
+
+const PIP_PACKAGE_KT = `package com.mindarena.pip
+
+import com.facebook.react.ReactPackage
+import com.facebook.react.bridge.NativeModule
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.uimanager.ViewManager
+
+class PiPPackage : ReactPackage {
+    override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
+        PiPModule.setReactContext(reactContext)
+        return listOf(PiPModule(reactContext))
+    }
+
+    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
+        return emptyList()
+    }
+}
+`;
+
+const CALL_FOREGROUND_SERVICE_KT = `package com.mindarena.pip
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+
+class CallForegroundService : Service() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = buildNotification()
+        startForeground(NOTIFICATION_ID, notification)
+        return START_NOT_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Ongoing Call",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows when a call is in progress"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
+            .setContentTitle("MindArena")
+            .setContentText("Call in progress")
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setOngoing(true)
+            .build()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "mindarena_call_channel"
+        private const val NOTIFICATION_ID = 1001
+    }
+}
+`;
+
+const PIP_ACTION_RECEIVER_KT = `package com.mindarena.pip
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+
+class PiPActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val action = intent?.action ?: return
+        when (action) {
+            ACTION_HANG_UP -> {
+                PiPModule.onPiPModeChanged(false)
+            }
+        }
+    }
+
+    companion object {
+        const val ACTION_HANG_UP = "com.mindarena.pip.ACTION_HANG_UP"
+    }
+}
+`;
+
+function withPiPNativeFiles(config) {
+  return withDangerousMod(config, [
+    "android",
+    (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
+      const pipDir = path.join(
+        projectRoot,
+        "android",
+        "app",
+        "src",
+        "main",
+        "java",
+        "com",
+        "mindarena",
+        "pip"
+      );
+      fs.mkdirSync(pipDir, { recursive: true });
+
+      fs.writeFileSync(path.join(pipDir, "PiPModule.kt"), PIP_MODULE_KT);
+      fs.writeFileSync(path.join(pipDir, "PiPPackage.kt"), PIP_PACKAGE_KT);
+      fs.writeFileSync(
+        path.join(pipDir, "CallForegroundService.kt"),
+        CALL_FOREGROUND_SERVICE_KT
+      );
+      fs.writeFileSync(
+        path.join(pipDir, "PiPActionReceiver.kt"),
+        PIP_ACTION_RECEIVER_KT
+      );
+
+      return cfg;
+    },
+  ]);
+}
 
 // ─── iOS: Info.plist background modes ───────────────────────────────────────
 
@@ -191,6 +399,7 @@ function withPiPInfoPlist(config) {
 // ─── Combined plugin ────────────────────────────────────────────────────────
 
 function withPiP(config) {
+  config = withPiPNativeFiles(config);
   config = withPiPAndroidManifest(config);
   config = withPiPMainActivity(config);
   config = withPiPMainApplication(config);
