@@ -29,7 +29,8 @@
       "WebFetch(domain:expo.dev)",
       "Bash(npx eas:*)",
       "WebFetch(domain:job-logs.eascdn.net)",
-      "Bash(node -e \"const p = require\\(''./plugins/withPiP''\\); console.log\\(typeof p, ''OK''\\)\")"
+      "Bash(node -e \"const p = require\\(''./plugins/withPiP''\\); console.log\\(typeof p, ''OK''\\)\")",
+      "Bash(./gradlew :app:compileReleaseKotlin)"
     ],
     "deny": [],
     "ask": []

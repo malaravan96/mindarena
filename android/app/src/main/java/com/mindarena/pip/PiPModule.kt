@@ -7,7 +7,6 @@ import android.util.Rational
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class PiPModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -16,7 +15,7 @@ class PiPModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun enterPiP() {
-        val activity = currentActivity ?: return
+        val activity = reactApplicationContext.currentActivity ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
@@ -26,14 +25,10 @@ class PiPModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun addListener(eventName: String?) {
-        // Required for RN event emitter
-    }
+    fun addListener(eventName: String?) {}
 
     @ReactMethod
-    fun removeListeners(count: Int) {
-        // Required for RN event emitter
-    }
+    fun removeListeners(count: Int) {}
 
     companion object {
         const val NAME = "PiPModule"
@@ -63,9 +58,7 @@ class PiPModule(reactContext: ReactApplicationContext) :
         }
 
         fun onPiPModeChanged(isInPiPMode: Boolean) {
-            reactContext
-                ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                ?.emit("onPiPModeChanged", isInPiPMode)
+            reactContext?.emitDeviceEvent("onPiPModeChanged", isInPiPMode)
         }
     }
 }

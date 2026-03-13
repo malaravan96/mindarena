@@ -180,7 +180,6 @@ import android.util.Rational
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class PiPModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -189,7 +188,7 @@ class PiPModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun enterPiP() {
-        val activity = currentActivity ?: return
+        val activity = reactApplicationContext.currentActivity ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
@@ -232,9 +231,7 @@ class PiPModule(reactContext: ReactApplicationContext) :
         }
 
         fun onPiPModeChanged(isInPiPMode: Boolean) {
-            reactContext
-                ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                ?.emit("onPiPModeChanged", isInPiPMode)
+            reactContext?.emitDeviceEvent("onPiPModeChanged", isInPiPMode)
         }
     }
 }
@@ -242,19 +239,36 @@ class PiPModule(reactContext: ReactApplicationContext) :
 
 const PIP_PACKAGE_KT = `package com.mindarena.pip
 
-import com.facebook.react.ReactPackage
+import com.facebook.react.BaseReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.uimanager.ViewManager
+import com.facebook.react.module.model.ReactModuleInfo
+import com.facebook.react.module.model.ReactModuleInfoProvider
 
-class PiPPackage : ReactPackage {
-    override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        PiPModule.setReactContext(reactContext)
-        return listOf(PiPModule(reactContext))
+class PiPPackage : BaseReactPackage() {
+    override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
+        return when (name) {
+            PiPModule.NAME -> {
+                PiPModule.setReactContext(reactContext)
+                PiPModule(reactContext)
+            }
+            else -> null
+        }
     }
 
-    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-        return emptyList()
+    override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {
+        return ReactModuleInfoProvider {
+            mapOf(
+                PiPModule.NAME to ReactModuleInfo(
+                    PiPModule.NAME,
+                    PiPModule.NAME,
+                    false,
+                    false,
+                    false,
+                    false
+                )
+            )
+        }
     }
 }
 `;
