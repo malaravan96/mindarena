@@ -1,24 +1,19 @@
+import Constants from 'expo-constants';
+
 type ExpoNotificationsModule = typeof import('expo-notifications');
 
-let notificationsModulePromise: Promise<ExpoNotificationsModule | null> | null = null;
-let warningLogged = false;
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
+let notificationsModulePromise: Promise<ExpoNotificationsModule | null> | null = null;
 
 export async function loadNotificationsModule(): Promise<ExpoNotificationsModule | null> {
+  if (isExpoGo) return null;
+
   if (!notificationsModulePromise) {
     notificationsModulePromise = import('expo-notifications').catch((error) => {
-      if (!warningLogged) {
-        warningLogged = true;
-        console.warn(
-          `[Notifications] expo-notifications unavailable. Push features are disabled until the native app is rebuilt. ${getErrorMessage(error)}`,
-        );
-      }
+      console.warn(
+        `[Notifications] expo-notifications unavailable. Push features disabled. ${error instanceof Error ? error.message : String(error)}`,
+      );
       return null;
     });
   }

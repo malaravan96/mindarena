@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
@@ -10,10 +10,13 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { getActiveConversationId, getActiveGroupId } from '@/lib/notificationState';
 import { loadNotificationsModule } from '@/lib/optionalNotifications';
 
+// Suppress known expo-router dev warning when returning from image picker
+LogBox.ignoreLogs(['Can\'t perform a React state update on a component that hasn\'t mounted yet']);
+
 // Set at module level so it is registered before any cold-start notification routing.
 // Suppress the banner when the user is already viewing the relevant chat.
 void loadNotificationsModule().then((Notifications) => {
-  if (!Notifications) return;
+  if (!Notifications || typeof Notifications.setNotificationHandler !== 'function') return;
 
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {

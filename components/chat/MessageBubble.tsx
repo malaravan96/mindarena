@@ -403,7 +403,8 @@ function ShockwaveRing({ origin }: { origin: { x: number; y: number } }) {
   }, []);
   const style = useAnimatedStyle(() => {
     const size = interpolate(progress.value, [0, 1], [20, 160]);
-    const opacity = interpolate(progress.value, [0, 0.3, 1], [0.4, 0.2, 0]);
+    const rawOpacity = interpolate(progress.value, [0, 0.3, 1], [0.4, 0.2, 0]);
+    const opacity = Math.round(rawOpacity * 1000) / 1000;
     return {
       position: 'absolute' as const,
       left: origin.x - size / 2, top: origin.y - size / 2,

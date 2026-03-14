@@ -1,20 +1,8 @@
-type CryptoWithRandomValues = {
-  getRandomValues<T extends ArrayBufferView | null>(array: T): T;
-  randomUUID?: () => string;
-};
-
-function getCrypto(): CryptoWithRandomValues {
-  const crypto = globalThis.crypto as CryptoWithRandomValues | undefined;
-  if (!crypto || typeof crypto.getRandomValues !== 'function') {
-    throw new Error('Secure random generation is unavailable in this runtime.');
-  }
-  return crypto;
-}
+import * as ExpoCrypto from 'expo-crypto';
 
 export function getRandomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  getCrypto().getRandomValues(bytes);
-  return bytes;
+  // expo-crypto.getRandomBytes works across all Expo runtimes (Expo Go + dev builds)
+  return ExpoCrypto.getRandomBytes(length);
 }
 
 function toHex(byte: number) {
@@ -22,9 +10,8 @@ function toHex(byte: number) {
 }
 
 export function randomUuid(): string {
-  const crypto = getCrypto();
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+  if (typeof ExpoCrypto.randomUUID === 'function') {
+    return ExpoCrypto.randomUUID();
   }
 
   const bytes = getRandomBytes(16);

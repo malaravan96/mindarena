@@ -78,6 +78,7 @@ export function ChatThreadScreen() {
 
   // ── Modal state ──
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pendingEmoji, setPendingEmoji] = useState<string | null>(null);
   const [showDisappearingModal, setShowDisappearingModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState<ReportReason>('spam');
@@ -572,6 +573,7 @@ export function ChatThreadScreen() {
               onOpenEmoji={() => setShowEmojiPicker(true)}
               onOpenPollCreator={() => setShowPollCreator(true)}
               onLayout={setComposerHeight}
+              insertText={pendingEmoji}
             />
           </KeyboardAvoidingView>
         </View>
@@ -580,7 +582,7 @@ export function ChatThreadScreen() {
       {/* Modals */}
       <EmojiPicker
         visible={showEmojiPicker}
-        onSelect={(emoji) => {/* TODO: forward to composer */}}
+        onSelect={(emoji) => { setPendingEmoji(emoji); requestAnimationFrame(() => setPendingEmoji(null)); }}
         onClose={() => setShowEmojiPicker(false)}
       />
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { loadAudioModule } from '@/lib/optionalAudio';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -27,6 +27,7 @@ interface MessageComposerProps {
   onOpenEmoji: () => void;
   onOpenPollCreator: () => void;
   onLayout?: (height: number) => void;
+  insertText?: string | null;
 }
 
 export function MessageComposer({
@@ -46,12 +47,13 @@ export function MessageComposer({
   onOpenEmoji,
   onOpenPollCreator,
   onLayout,
+  insertText,
 }: MessageComposerProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recording, setRecording] = useState<any>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,6 +84,13 @@ export function MessageComposer({
       setInput(editingMessage.body);
     }
   }, [editingMessage]);
+
+  // Insert text from parent (e.g. emoji picker)
+  useEffect(() => {
+    if (insertText) {
+      setInput((prev) => prev + insertText);
+    }
+  }, [insertText]);
 
   // Cleanup recording on unmount
   useEffect(() => {
@@ -133,6 +142,12 @@ export function MessageComposer({
   const startRecording = useCallback(async () => {
     if (isRecording || isBlocked) return;
     try {
+      const av = await loadAudioModule();
+      if (!av) {
+        showAlert('Unavailable', 'Voice recording requires a development build.');
+        return;
+      }
+      const { Audio } = av;
       const permission = await Audio.requestPermissionsAsync();
       if (!permission.granted) {
         showAlert('Permission required', 'Microphone access is needed to send voice messages.');
