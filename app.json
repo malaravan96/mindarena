@@ -28,7 +28,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "MindArena uses your camera for live video calls.",
-        "NSMicrophoneUsageDescription": "MindArena uses your microphone for live match voice calls."
+        "NSMicrophoneUsageDescription": "MindArena uses your microphone for live match voice calls.",
+        "NSPhotoLibraryUsageDescription": "MindArena lets you choose photos to create custom jigsaw puzzles."
       },
       "bitcode": false
     },

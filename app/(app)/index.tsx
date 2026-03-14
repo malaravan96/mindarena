@@ -421,6 +421,8 @@ export default function Home() {
               { key: 'puzzle-streak', label: 'Streak', icon: 'trending-up-outline' as const, desc: 'Don\'t miss!' },
               { key: 'category-mastery', label: 'Mastery', icon: 'school-outline' as const, desc: 'Per category' },
               { key: 'practice', label: 'Practice', icon: 'book-outline' as const, desc: 'No pressure' },
+              { key: 'jigsaw-puzzles', label: 'Jigsaw', icon: 'images-outline' as const, desc: 'System or custom' },
+              { key: 'pieces-shape-puzzle', label: 'Shapes', icon: 'extension-puzzle-outline' as const, desc: 'Fill the square' },
             ].map((mode) => (
               <Pressable
                 key={mode.key}

@@ -401,6 +401,29 @@ export interface WeeklyChallenge {
   ends_at: string;
 }
 
+export interface JigsawRecord {
+  id: string;
+  user_id: string;
+  puzzle_key: string;
+  grid_size: number;
+  best_ms: number;
+  best_moves: number;
+  points_awarded: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShapePuzzleRecord {
+  id: string;
+  user_id: string;
+  level_key: string;
+  best_ms: number;
+  best_moves: number;
+  points_awarded: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Tournaments ─────────────────────────────────────────────
 
 export interface Tournament {

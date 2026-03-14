@@ -239,6 +239,8 @@ function AppLayoutContent() {
         <Tabs.Screen name="puzzle-streak" options={{ href: null }} />
         <Tabs.Screen name="category-mastery" options={{ href: null }} />
         <Tabs.Screen name="practice" options={{ href: null }} />
+        <Tabs.Screen name="jigsaw-puzzles" options={{ href: null }} />
+        <Tabs.Screen name="pieces-shape-puzzle" options={{ href: null }} />
         <Tabs.Screen name="weekly-challenge" options={{ href: null }} />
         <Tabs.Screen name="tournaments" options={{ href: null }} />
         <Tabs.Screen name="tournament-detail" options={{ href: null }} />
