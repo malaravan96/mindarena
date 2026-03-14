@@ -5,7 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { Swipeable } from 'react-native-gesture-handler';
+import { Swipeable as RNGHSwipeable } from 'react-native-gesture-handler';
+
+// Swipeable can crash on some Android production builds — provide a safe fallback
+let Swipeable: typeof RNGHSwipeable | null = null;
+try {
+  // Verify the component can be referenced without throwing
+  if (RNGHSwipeable) Swipeable = RNGHSwipeable;
+} catch {
+  Swipeable = null;
+}
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Card } from '@/components/Card';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -48,6 +57,7 @@ export default function ChatScreen() {
   const [activeTab, setActiveTab] = useState<'all' | 'dms' | 'groups'>('all');
   const [showArchived, setShowArchived] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [chatPrefs, setChatPrefs] = useState<ChatListPrefs>(DEFAULT_CHAT_LIST_PREFS);
 
   const prefsKey = useMemo(
@@ -180,11 +190,12 @@ export default function ChatScreen() {
 
   const loadData = useCallback(async (uid: string) => {
     setLoading(true);
+    setError(null);
     try {
       const [rows, people, pending, groupRows] = await Promise.all([
-        listConversations(uid),
-        listMessageTargets(uid),
-        listConnections(uid, 'pending'),
+        listConversations(uid).catch(() => [] as DmConversation[]),
+        listMessageTargets(uid).catch(() => []),
+        listConnections(uid, 'pending').catch(() => [] as ConnectionWithProfile[]),
         listGroupConversations(uid).catch(() => [] as GroupConversation[]),
       ]);
       setConversations(rows);
@@ -192,6 +203,8 @@ export default function ChatScreen() {
       setGroups(groupRows);
       // Only show incoming pending requests (where current user is the target)
       setPendingRequests(pending.filter((c) => c.target_id === uid));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load chats');
     } finally {
       setLoading(false);
     }
@@ -229,47 +242,54 @@ export default function ChatScreen() {
     let realtime: RealtimeChannel | null = null;
 
     (async () => {
-      const uid = await getCurrentUserId();
-      if (!uid || !mounted) return;
-      setUserId(uid);
-      await loadData(uid);
+      try {
+        const uid = await getCurrentUserId();
+        if (!uid || !mounted) return;
+        setUserId(uid);
+        await loadData(uid);
 
-      realtime = supabase
-        .channel(`dm-list-${uid}`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'dm_messages' },
-          () => loadData(uid),
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'user_connections' },
-          () => loadData(uid),
-        )
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'group_messages' },
-          () => loadData(uid),
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'chat_list_preferences',
-            filter: `user_id=eq.${uid}`,
-          },
-          () => {
-            void readChatListPrefs(uid)
-              .then((prefs) => {
-                if (!mounted || !prefs) return;
-                setChatPrefs(prefs);
-                void setItem(`chat_list_prefs_${uid}`, JSON.stringify(prefs));
-              })
-              .catch(() => undefined);
-          },
-        )
-        .subscribe();
+        realtime = supabase
+          .channel(`dm-list-${uid}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'dm_messages' },
+            () => { void loadData(uid); },
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'user_connections' },
+            () => { void loadData(uid); },
+          )
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'group_messages' },
+            () => { void loadData(uid); },
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'chat_list_preferences',
+              filter: `user_id=eq.${uid}`,
+            },
+            () => {
+              void readChatListPrefs(uid)
+                .then((prefs) => {
+                  if (!mounted || !prefs) return;
+                  setChatPrefs(prefs);
+                  void setItem(`chat_list_prefs_${uid}`, JSON.stringify(prefs));
+                })
+                .catch(() => undefined);
+            },
+          )
+          .subscribe();
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to initialize chat');
+          setLoading(false);
+        }
+      }
     })();
 
     return () => {
@@ -282,11 +302,15 @@ export default function ChatScreen() {
     useCallback(() => {
       let active = true;
       (async () => {
-        const uid = userId ?? (await getCurrentUserId());
-        if (!uid || !active) return;
-        if (!userId) setUserId(uid);
-        await loadData(uid);
-        if (active) refreshUnread();
+        try {
+          const uid = userId ?? (await getCurrentUserId());
+          if (!uid || !active) return;
+          if (!userId) setUserId(uid);
+          await loadData(uid);
+          if (active) refreshUnread();
+        } catch {
+          // loadData already sets the error state
+        }
       })();
       return () => {
         active = false;
@@ -416,6 +440,8 @@ export default function ChatScreen() {
         await loadData(uid);
         refreshUnread();
       }
+    } catch {
+      // loadData already sets the error state
     } finally {
       setRefreshing(false);
     }
@@ -523,7 +549,24 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      {loading ? (
+      {error ? (
+        <View style={styles.loadingWrap}>
+          <Ionicons name="warning-outline" size={40} color={colors.error} />
+          <Text style={[styles.errorText, { color: colors.text }]}>Something went wrong</Text>
+          <Text style={[styles.errorDetail, { color: colors.textSecondary }]}>{error}</Text>
+          <Pressable
+            onPress={() => {
+              setError(null);
+              const uid = userId;
+              if (uid) void loadData(uid);
+            }}
+            style={[styles.retryBtn, { backgroundColor: colors.primary }]}
+          >
+            <Ionicons name="refresh-outline" size={16} color="#fff" />
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -673,7 +716,7 @@ export default function ChatScreen() {
                       </Pressable>
                     );
 
-                    if (Platform.OS === 'web') {
+                    if (Platform.OS === 'web' || !Swipeable) {
                       return <View key={conv.id}>{row}</View>;
                     }
 
@@ -802,7 +845,7 @@ export default function ChatScreen() {
                       </Pressable>
                     );
 
-                    if (Platform.OS === 'web') {
+                    if (Platform.OS === 'web' || !Swipeable) {
                       return <View key={group.id}>{row}</View>;
                     }
 
@@ -1122,5 +1165,31 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     textAlign: 'center',
     paddingHorizontal: spacing.xl,
+  },
+  errorText: {
+    fontSize: fontSize.lg,
+    fontWeight: fontWeight.bold,
+    marginTop: spacing.md,
+    textAlign: 'center' as const,
+  },
+  errorDetail: {
+    fontSize: fontSize.sm,
+    marginTop: spacing.xs,
+    textAlign: 'center' as const,
+    paddingHorizontal: spacing.xl,
+  },
+  retryBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
   },
 });

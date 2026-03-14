@@ -30,7 +30,9 @@
       "Bash(npx eas:*)",
       "WebFetch(domain:job-logs.eascdn.net)",
       "Bash(node -e \"const p = require\\(''./plugins/withPiP''\\); console.log\\(typeof p, ''OK''\\)\")",
-      "Bash(./gradlew :app:compileReleaseKotlin)"
+      "Bash(./gradlew :app:compileReleaseKotlin)",
+      "Bash(node -e \"try { const s = require\\(''react-native-gesture-handler''\\); console.log\\(''Swipeable:'', typeof s.Swipeable\\); console.log\\(''Keys containing swipe:'', Object.keys\\(s\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''swipe''\\)\\)\\); } catch\\(e\\) { console.log\\(''Error:'', e.message\\); }\")",
+      "Bash(node -e \"const pkg = require\\(''react-native-gesture-handler/package.json''\\); console.log\\(''Version:'', pkg.version\\);\")"
     ],
     "deny": [],
     "ask": []
