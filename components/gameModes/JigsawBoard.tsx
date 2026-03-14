@@ -356,7 +356,15 @@ export function JigsawBoard({
           </View>
         </View>
 
-        <View style={[styles.playArea, { height: boardSize + spacing.lg + trayHeight }]}>
+        <View
+          style={[
+            styles.playArea,
+            {
+              width: boardSize,
+              height: boardSize + spacing.lg + trayHeight,
+            },
+          ]}
+        >
           <View style={[styles.board, { width: boardSize, height: boardSize, borderColor: colors.border }]}>
             <JigsawArtworkCanvas
               size={boardSize}
@@ -502,7 +510,6 @@ const styles = StyleSheet.create({
   playArea: {
     position: 'relative',
     alignSelf: 'center',
-    width: '100%',
   },
   board: {
     alignSelf: 'center',

@@ -361,7 +361,15 @@ export function PiecesShapeBoard({ level, onComplete, onBack }: Props) {
           </View>
         </View>
 
-        <View style={[styles.playArea, { height: boardSize + spacing.lg + totalTrayHeight + spacing.xl }]}>
+        <View
+          style={[
+            styles.playArea,
+            {
+              width: boardSize,
+              height: boardSize + spacing.lg + totalTrayHeight + spacing.xl,
+            },
+          ]}
+        >
           <View style={[styles.board, { width: boardSize, height: boardSize, borderColor: colors.border }]}>
             {Array.from({ length: level.boardSize * level.boardSize }, (_, index) => (
               <View
@@ -493,7 +501,6 @@ const styles = StyleSheet.create({
   playArea: {
     position: 'relative',
     alignSelf: 'center',
-    width: '100%',
   },
   board: {
     alignSelf: 'center',
