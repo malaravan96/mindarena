@@ -1,8 +1,26 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 
 const { PiPModule } = NativeModules;
+const pipWarnings = new Set<string>();
 
 let emitter: NativeEventEmitter | null = null;
+
+function warnMissingMethod(methodName: string) {
+  const key = `missing:${methodName}`;
+  if (pipWarnings.has(key)) return;
+  pipWarnings.add(key);
+  console.warn(`[PiP] Native method "${methodName}" is unavailable. PiP features are disabled.`);
+}
+
+function getNativeMethod<T extends (...args: any[]) => any>(methodName: string): T | null {
+  if (!PiPModule) return null;
+  const candidate = (PiPModule as Record<string, unknown>)[methodName];
+  if (typeof candidate !== 'function') {
+    warnMissingMethod(methodName);
+    return null;
+  }
+  return candidate as T;
+}
 
 function getEmitter(): NativeEventEmitter | null {
   if (!PiPModule) return null;
@@ -39,9 +57,10 @@ export type PiPEvent =
  * Returns true if PiP was entered successfully.
  */
 export async function enterPiP(): Promise<boolean> {
-  if (!PiPModule) return false;
+  const enter = getNativeMethod<() => Promise<boolean>>('enterPiP');
+  if (!enter) return false;
   try {
-    return await PiPModule.enterPiP();
+    return await enter();
   } catch {
     return false;
   }
@@ -51,9 +70,10 @@ export async function enterPiP(): Promise<boolean> {
  * Exit PiP mode and return to full-screen.
  */
 export async function exitPiP(): Promise<boolean> {
-  if (!PiPModule) return false;
+  const exit = getNativeMethod<() => Promise<boolean>>('exitPiP');
+  if (!exit) return false;
   try {
-    return await PiPModule.exitPiP();
+    return await exit();
   } catch {
     return false;
   }
@@ -64,9 +84,10 @@ export async function exitPiP(): Promise<boolean> {
  * On iOS this returns false — CallKit background audio is used instead.
  */
 export async function isPiPSupported(): Promise<boolean> {
-  if (!PiPModule) return false;
+  const checkSupported = getNativeMethod<() => Promise<boolean>>('isPiPSupported');
+  if (!checkSupported) return false;
   try {
-    return await PiPModule.isPiPSupported();
+    return await checkSupported();
   } catch {
     return false;
   }
@@ -81,12 +102,13 @@ export function setCallActive(
   active: boolean,
   options?: { peerName?: string; hasVideo?: boolean; isMuted?: boolean },
 ): void {
-  if (!PiPModule) return;
+  const setActive = getNativeMethod<(...args: any[]) => void>('setCallActive');
+  if (!setActive) return;
 
   if (Platform.OS === 'android') {
-    PiPModule.setCallActive(active);
+    setActive(active);
   } else if (Platform.OS === 'ios') {
-    PiPModule.setCallActive(
+    setActive(
       active,
       options?.peerName ?? 'Call',
       options?.hasVideo ?? false,
@@ -99,8 +121,9 @@ export function setCallActive(
  * Android only — updates the RemoteAction icons in the PiP window.
  */
 export function updatePiPActions(isMuted: boolean): void {
-  if (!PiPModule) return;
-  PiPModule.updatePiPActions(isMuted);
+  const updateActions = getNativeMethod<(muted: boolean) => void>('updatePiPActions');
+  if (!updateActions) return;
+  updateActions(isMuted);
 }
 
 /**
@@ -108,25 +131,30 @@ export function updatePiPActions(isMuted: boolean): void {
  * Android only — iOS uses CallKit instead.
  */
 export function startForegroundService(peerName: string): void {
-  if (!PiPModule || Platform.OS !== 'android') return;
-  PiPModule.startForegroundService(peerName);
+  if (Platform.OS !== 'android') return;
+  const startService = getNativeMethod<(nextPeerName: string) => void>('startForegroundService');
+  if (!startService) return;
+  startService(peerName);
 }
 
 /**
  * Stop the foreground service when the call ends.
  */
 export function stopForegroundService(): void {
-  if (!PiPModule || Platform.OS !== 'android') return;
-  PiPModule.stopForegroundService();
+  if (Platform.OS !== 'android') return;
+  const stopService = getNativeMethod<() => void>('stopForegroundService');
+  if (!stopService) return;
+  stopService();
 }
 
 /**
  * Get current PiP mode state synchronously (async bridge).
  */
 export async function getIsInPiPMode(): Promise<boolean> {
-  if (!PiPModule) return false;
+  const getMode = getNativeMethod<() => Promise<boolean>>('getIsInPiPMode');
+  if (!getMode) return false;
   try {
-    return await PiPModule.getIsInPiPMode();
+    return await getMode();
   } catch {
     return false;
   }
