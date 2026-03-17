@@ -2,7 +2,25 @@ import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 
 const { PiPModule } = NativeModules;
 
-const emitter = PiPModule ? new NativeEventEmitter(PiPModule) : null;
+let emitter: NativeEventEmitter | null = null;
+
+function getEmitter(): NativeEventEmitter | null {
+  if (!PiPModule) return null;
+  if (emitter) return emitter;
+
+  try {
+    emitter = new NativeEventEmitter(PiPModule);
+  } catch (error) {
+    console.warn(
+      `[PiP] NativeEventEmitter unavailable. PiP event subscription is disabled. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    emitter = null;
+  }
+
+  return emitter;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -124,18 +142,19 @@ export async function getIsInPiPMode(): Promise<boolean> {
  * Returns an unsubscribe function.
  */
 export function addPiPListener(callback: (event: PiPEvent) => void): () => void {
-  if (!emitter) return () => {};
+  const eventEmitter = getEmitter();
+  if (!eventEmitter) return () => {};
 
   const subs = [
-    emitter.addListener('onPiPModeChanged', (data: { isInPiP: boolean }) => {
+    eventEmitter.addListener('onPiPModeChanged', (data: { isInPiP: boolean }) => {
       callback({ type: 'pipModeChanged', isInPiP: data.isInPiP });
     }),
-    emitter.addListener('onPiPAction', (data: { action: string }) => {
+    eventEmitter.addListener('onPiPAction', (data: { action: string }) => {
       if (data.action === 'toggleMute' || data.action === 'hangUp') {
         callback({ type: 'pipAction', action: data.action });
       }
     }),
-    emitter.addListener('onCallKitAction', (data: { action: string; isMuted?: boolean }) => {
+    eventEmitter.addListener('onCallKitAction', (data: { action: string; isMuted?: boolean }) => {
       if (data.action === 'mute') {
         callback({ type: 'callKitAction', action: 'mute', isMuted: data.isMuted ?? false });
       } else if (data.action === 'hangUp') {

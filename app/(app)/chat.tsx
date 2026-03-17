@@ -321,7 +321,7 @@ export default function ChatScreen() {
   async function openConversation(peerUserId: string) {
     try {
       const id = await getOrCreateConversation(peerUserId);
-      router.push({ pathname: '/chat-thread', params: { conversationId: id } });
+      router.push({ pathname: '/chat-thread', params: { conversationId: String(id) } });
     } catch {
       if (userId) loadData(userId);
     }
@@ -653,7 +653,10 @@ export default function ChatScreen() {
                     const row = (
                       <Pressable
                         onPress={() =>
-                          router.push({ pathname: '/chat-thread', params: { conversationId: conv.id } })
+                          router.push({
+                            pathname: '/chat-thread',
+                            params: { conversationId: String(conv.id) },
+                          })
                         }
                         style={[
                           styles.row,

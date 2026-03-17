@@ -61,7 +61,10 @@ import { MessageSearchSheet } from '@/components/chat/MessageSearchSheet';
 
 export function ChatThreadScreen() {
   const router = useRouter();
-  const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
+  const params = useLocalSearchParams<{ conversationId?: string | string[] }>();
+  const conversationId = Array.isArray(params.conversationId)
+    ? params.conversationId[0]
+    : params.conversationId;
   const { colors } = useTheme();
   const { setActiveConversationId, consumePendingIncomingInvite } = useGlobalNotifications();
 
